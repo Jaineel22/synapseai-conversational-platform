@@ -19,29 +19,37 @@ app.use(cors({
 }));
 
 // ─── MongoDB Connection ────────────────────────────────────
-const mongooseOptions = {
-    tls: true,
-    tlsAllowInvalidCertificates: true,
-    serverSelectionTimeoutMS: 5000,
-    socketTimeoutMS: 45000,
+// Cached connection — important for serverless environments
+// Vercel serverless functions are stateless; without caching,
+// a new DB connection would be made on every single request
+let isConnected = false;
+
+const connectDB = async () => {
+    if (isConnected) return;
+
+    try {
+        await mongoose.connect(process.env.MONGODB_URI, {
+            tls: true,
+            tlsAllowInvalidCertificates: true,
+            serverSelectionTimeoutMS: 5000,
+            socketTimeoutMS: 45000,
+        });
+        isConnected = true;
+        console.log('Connected to MongoDB');
+    } catch (err) {
+        console.error('MongoDB connection failed:', err.message);
+        throw err;
+    }
 };
 
-mongoose.connect(process.env.MONGODB_URI, mongooseOptions)
-    .then(() => {
-        console.log('Connected to MongoDB');
-        console.log('Database:', mongoose.connection.db.databaseName);
-    })
-    .catch(err => {
-        console.error('MongoDB connection failed:', err.message);
-        process.exit(1);
-    });
-
-mongoose.connection.on('error', err => {
-    console.error('MongoDB error:', err.message);
-});
-
-mongoose.connection.on('disconnected', () => {
-    console.warn('MongoDB disconnected');
+// Connect before handling any request
+app.use(async (req, res, next) => {
+    try {
+        await connectDB();
+        next();
+    } catch (err) {
+        res.status(500).json({ error: 'Database connection failed' });
+    }
 });
 
 // ─── Routes ───────────────────────────────────────────────
@@ -61,7 +69,13 @@ app.use((err, req, res, next) => {
     });
 });
 
-// ─── Start Server ─────────────────────────────────────────
-app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-});
+// ─── Local Dev: start server normally ─────────────────────
+// In production (Vercel), the export below is used instead
+if (process.env.NODE_ENV !== 'production') {
+    app.listen(PORT, () => {
+        console.log(`Server running on http://localhost:${PORT}`);
+    });
+}
+
+// ─── Vercel Serverless Export ─────────────────────────────
+export default app;
