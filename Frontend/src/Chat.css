@@ -1,0 +1,269 @@
+/* ========================================
+   CHAT — Synapse Bubbles
+   ======================================== */
+
+.chats {
+  width: 100%;
+  max-width: 720px;
+  overflow-y: auto;
+  padding: 2rem 1.5rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+  flex: 1;
+}
+
+/* Welcome message */
+.welcome-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 1.5rem;
+  animation: fadeInScale 0.5s ease;
+}
+
+.welcome-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 22px;
+  background: var(--grad-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  box-shadow: 0 0 50px var(--plasma-blue-glow);
+  animation: glow-pulse 3s ease infinite;
+}
+
+.welcome-title {
+  font-size: 1.6rem;
+  font-weight: 600;
+  background: var(--grad-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.welcome-sub {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-family: 'Space Mono', monospace;
+}
+
+/* Message wrapper */
+.userDiv,
+.gptDiv {
+  display: flex;
+  animation: fadeInScale 0.35s var(--transition-smooth);
+}
+
+.userDiv {
+  justify-content: flex-end;
+}
+
+.gptDiv {
+  justify-content: flex-start;
+}
+
+/* USER MESSAGE — Gradient bubble */
+.userMessage {
+  background: var(--grad-primary);
+  color: #fff;
+  padding: 12px 18px;
+  border-radius: 18px 18px 4px 18px;
+  max-width: 68%;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  font-weight: 400;
+  box-shadow: 0 4px 20px var(--plasma-blue-glow);
+  position: relative;
+  word-break: break-word;
+  transition: box-shadow 0.3s ease;
+}
+
+.userMessage:hover {
+  box-shadow: 0 6px 30px var(--plasma-blue-glow);
+}
+
+/* AI MESSAGE — Glassmorphic card */
+.gptDiv {
+  position: relative;
+}
+
+.gptDiv > div,
+.gptDiv > p {
+  background: var(--bg-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border-color);
+  border-radius: 4px 18px 18px 18px;
+  padding: 14px 18px;
+  max-width: 78%;
+  font-size: 0.9rem;
+  line-height: 1.7;
+  color: var(--text-primary);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15), inset 0 0 30px rgba(0, 102, 255, 0.02);
+  position: relative;
+  overflow: hidden;
+}
+
+.gptDiv > div::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(0, 102, 255, 0.3), transparent);
+}
+
+/* Typing animation container */
+.typing-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 18px;
+  background: var(--bg-glass);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border-color);
+  border-radius: 4px 18px 18px 18px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
+  animation: fadeInScale 0.3s ease;
+}
+
+.typing-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--plasma-blue);
+  animation: typing-bounce 1.4s ease infinite;
+}
+
+.typing-dot:nth-child(1) { animation-delay: 0s; background: var(--plasma-blue); }
+.typing-dot:nth-child(2) { animation-delay: 0.2s; background: var(--neural-violet); }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; background: var(--synapse-teal); }
+
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+  30% { transform: translateY(-6px); opacity: 1; }
+}
+
+/* Markdown content styles */
+.gptDiv p {
+  margin: 0 0 0.75rem;
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+.gptDiv p:last-child {
+  margin-bottom: 0;
+}
+
+.gptDiv h1, .gptDiv h2, .gptDiv h3 {
+  font-weight: 600;
+  margin: 1rem 0 0.5rem;
+  background: var(--grad-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gptDiv h1 { font-size: 1.3rem; }
+.gptDiv h2 { font-size: 1.1rem; }
+.gptDiv h3 { font-size: 1rem; }
+
+.gptDiv code {
+  font-family: 'Space Mono', monospace;
+  font-size: 0.82rem;
+  background: rgba(0, 102, 255, 0.1);
+  color: var(--synapse-teal);
+  padding: 2px 6px;
+  border-radius: 5px;
+  border: 1px solid rgba(0, 102, 255, 0.15);
+}
+
+.gptDiv pre {
+  margin: 0.75rem 0;
+  border-radius: 12px !important;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  position: relative;
+}
+
+.gptDiv pre::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--grad-primary);
+  z-index: 1;
+}
+
+.gptDiv pre code {
+  background: transparent !important;
+  color: inherit !important;
+  padding: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
+}
+
+.hljs {
+  border-radius: 12px !important;
+  font-size: 0.82rem !important;
+}
+
+pre {
+  white-space: pre-wrap;
+}
+
+.gptDiv ul, .gptDiv ol {
+  padding-left: 1.5rem;
+  margin: 0.5rem 0;
+}
+
+.gptDiv li {
+  margin-bottom: 0.25rem;
+}
+
+.gptDiv blockquote {
+  border-left: 3px solid var(--plasma-blue);
+  margin: 0.75rem 0;
+  padding: 0.5rem 1rem;
+  background: rgba(0, 102, 255, 0.05);
+  border-radius: 0 8px 8px 0;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.gptDiv a {
+  color: var(--plasma-blue);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(0, 102, 255, 0.3);
+  transition: border-color 0.2s ease;
+}
+
+.gptDiv a:hover {
+  border-color: var(--plasma-blue);
+}
+
+/* Custom scrollbar for chats */
+.chats::-webkit-scrollbar {
+  width: 3px;
+}
+
+.chats::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chats::-webkit-scrollbar-thumb {
+  background: linear-gradient(to bottom, var(--plasma-blue), var(--neural-violet));
+  border-radius: 10px;
+  animation: data-stream 3s linear infinite;
+}

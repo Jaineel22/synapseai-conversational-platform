@@ -1,0 +1,12 @@
+/* App.css — Root overrides for SynapseAI */
+
+* {
+  font-family: 'Exo 2', 'Space Mono', sans-serif;
+}
+
+.app {
+  background: var(--grad-bg, #05060F);
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}

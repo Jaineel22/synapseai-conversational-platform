@@ -1,109 +1,67 @@
 import express from 'express';
 import "dotenv/config";
 import cors from "cors";
+import cookieParser from 'cookie-parser';
 import mongoose from 'mongoose';
-import chatRoutes from "./routes/chat.js";
+
+import chatRoutes from './routes/chat.js';
+import authRoutes from './routes/auth.js';
 
 const app = express();
-const PORT = 8080;
+const PORT = process.env.PORT || 8080;
 
+// ─── Middleware ────────────────────────────────────────────
 app.use(express.json());
-app.use(cors());
+app.use(cookieParser());
+app.use(cors({
+    origin: process.env.CLIENT_ORIGIN,
+    credentials: true
+}));
 
-app.use("/api", chatRoutes);
+// ─── MongoDB Connection ────────────────────────────────────
+const mongooseOptions = {
+    tls: true,
+    tlsAllowInvalidCertificates: true,
+    serverSelectionTimeoutMS: 5000,
+    socketTimeoutMS: 45000,
+};
 
-app.listen(PORT, () => {
-    console.log(`server running on ${PORT}`);
-    connectDB();
+mongoose.connect(process.env.MONGODB_URI, mongooseOptions)
+    .then(() => {
+        console.log('Connected to MongoDB');
+        console.log('Database:', mongoose.connection.db.databaseName);
+    })
+    .catch(err => {
+        console.error('MongoDB connection failed:', err.message);
+        process.exit(1);
+    });
+
+mongoose.connection.on('error', err => {
+    console.error('MongoDB error:', err.message);
 });
 
-const connectDB = async() => {
-    try {
-        await mongoose.connect(process.env.MONGODB_URI);
-        console.log("Connected with Database!");
-    } catch(err) {
-        console.log("Failed to connect with Db", err);
-    }
-}
+mongoose.connection.on('disconnected', () => {
+    console.warn('MongoDB disconnected');
+});
 
-// Initialize Google GenAI with API key from environment variables
-// const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// ─── Routes ───────────────────────────────────────────────
+app.use('/api/auth', authRoutes);
+app.use('/api', chatRoutes);
 
-// app.post("/test", async (req, res) => {
-//     try {
-//         // Extract the user message from request body
-//         const userMessage = req.body.message;
-        
-//         if (!userMessage) {
-//             return res.status(400).send({ error: "Message is required in request body" });
-//         }
+// ─── 404 Handler ──────────────────────────────────────────
+app.use((req, res) => {
+    res.status(404).json({ error: `Route ${req.method} ${req.originalUrl} not found` });
+});
 
-//         console.log(`Processing request with message: "${userMessage}"`);
+// ─── Global Error Handler ─────────────────────────────────
+app.use((err, req, res, next) => {
+    console.error('Unhandled error:', err.message);
+    res.status(err.status || 500).json({
+        error: err.message || 'Internal server error'
+    });
+});
 
-//         // Call Google GenAI with gemini-3-flash-preview model
-//         const response = await ai.models.generateContent({
-//             model: "gemini-3-flash-preview",
-//             contents: userMessage,
-//             // Optional: Add generation config if needed
-//             // config: {
-//             //     temperature: 0.7,
-//             //     maxOutputTokens: 800,
-//             // }
-//         });
-
-//         // Extract the text response
-//         const aiResponse = response.text;
-        
-//         console.log("Response received from Gemini");
-//         console.log("AI Response:", aiResponse);
-
-//         // Send response back to client
-//         res.send({ 
-//             success: true,
-//             message: aiResponse,
-//             model: "gemini-3-flash-preview"
-//         });
-
-//     } catch(err) {
-//         console.error("Error calling Gemini API:", err);
-        
-//         // Send appropriate error response
-//         res.status(500).send({ 
-//             error: "Failed to generate content",
-//             details: err.message 
-//         });
-//     }
-// });
-
-// // Optional: Add a health check endpoint
-// app.get("/health", (req, res) => {
-//     res.send({ status: "OK", model: "gemini-3-flash-preview" });
-// });
-
-
-
-
-// import { GoogleGenerativeAI } from "@google/generative-ai";
-// import "dotenv/config";
-
-// const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-
-// const model = genAI.getGenerativeModel({
-//   model: "gemini-3-flash-preview",
-// });
-
-// async function main() {
-//   try {
-//     const result = await model.generateContent(
-//       "Joke on people having funny behaviour"
-//     );
-
-//     const text = result.response.text();
-//     console.log(text);
-
-//   } catch (error) {
-//     console.error(error.message);
-//   }
-// }
-
-// main();
+// ─── Start Server ─────────────────────────────────────────
+app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+});

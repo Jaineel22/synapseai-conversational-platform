@@ -15,7 +15,7 @@ const getGeminiAPIResponse = async (message) => {
             throw new Error('GEMINI_API_KEY not found in environment variables');
         }
 
-        console.log(`📤 Sending request to Gemini with message: "${message.substring(0, 50)}${message.length > 50 ? '...' : ''}"`);
+        console.log(`Sending request to Gemini with message: "${message.substring(0, 50)}${message.length > 50 ? '...' : ''}"`);
 
         // Call Google GenAI with gemini-3-flash-preview model
         const response = await ai.models.generateContent({
@@ -37,12 +37,12 @@ const getGeminiAPIResponse = async (message) => {
             throw new Error('Empty response received from Gemini');
         }
 
-        console.log(`📥 Received response from Gemini: "${reply.substring(0, 50)}${reply.length > 50 ? '...' : ''}"`);
+        console.log(`Received response from Gemini: "${reply.substring(0, 50)}${reply.length > 50 ? '...' : ''}"`);
         
         return reply;
 
     } catch (err) {
-        console.error("❌ Error in getGeminiAPIResponse:", err.message);
+        console.error("Error in getGeminiAPIResponse:", err.message);
         
         // Handle specific error types
         if (err.message.includes('API key')) {
