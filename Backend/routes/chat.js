@@ -19,6 +19,7 @@ router.get("/thread", async (req, res) => {
       .select("threadId title updatedAt"); // only send what frontend needs
     res.json(threads);
   } catch (err) {
+    console.error("Fetch threads error:", err);
     res.status(500).json({ error: "Failed to fetch threads" });
   }
 });
@@ -36,6 +37,7 @@ router.get("/thread/:threadId", async (req, res) => {
     }
     res.json(thread.messages);
   } catch (err) {
+    console.error("Fetch chat error:", err);
     res.status(500).json({ error: "Failed to fetch chat" });
   }
 });
@@ -100,7 +102,7 @@ router.post("/chat", async (req, res) => {
     res.json({ reply: assistantReply });
   } catch (err) {
     console.error("Chat endpoint error:", err);
-    res.status(500).json({ error: "Something went wrong", details: err.message });
+    res.status(500).json({ error: "Something went wrong" });
   }
 });
 

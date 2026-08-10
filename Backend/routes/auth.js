@@ -22,7 +22,8 @@ router.post("/register", async (req, res) => {
     try {
         const { name, email, password } = req.body;
 
-        if (!name || !email || !password) {
+        if (!name || !email || !password ||
+            typeof name !== 'string' || typeof email !== 'string' || typeof password !== 'string') {
             return res.status(400).json({ error: "All fields are required" });
         }
 
@@ -54,7 +55,8 @@ router.post("/register", async (req, res) => {
         if (error.name === "MongoServerError" && error.code === 11000) {
             return res.status(400).json({ error: "Email already exists" });
         }
-        res.status(500).json({ error: "Failed to register user", details: error.message });
+        console.error('Register error:', error);
+        res.status(500).json({ error: "Failed to register user" });
     }
 });
 
@@ -65,7 +67,7 @@ router.post("/login", async (req, res) => {
     try {
         const { email, password } = req.body;
 
-        if (!email || !password) {
+        if (!email || !password || typeof email !== 'string' || typeof password !== 'string') {
             return res.status(400).json({ error: "Email and password are required" });
         }
 
@@ -93,6 +95,7 @@ router.post("/login", async (req, res) => {
             token,
         });
     } catch (error) {
+        console.error('Login error:', error);
         res.status(500).json({ error: "Failed to login" });
     }
 });
@@ -116,6 +119,7 @@ router.get("/me", authMiddleware, async (req, res) => {
         }
         res.json({ user: { id: user._id, name: user.name, email: user.email, theme: user.theme } });
     } catch (error) {
+        console.error('Fetch user error:', error);
         res.status(500).json({ error: "Failed to fetch user" });
     }
 });
@@ -134,6 +138,7 @@ router.put("/theme", authMiddleware, async (req, res) => {
         await User.findByIdAndUpdate(req.userId, { theme });
         res.json({ message: "Theme updated successfully", theme });
     } catch (error) {
+        console.error('Update theme error:', error);
         res.status(500).json({ error: "Failed to update theme" });
     }
 });
