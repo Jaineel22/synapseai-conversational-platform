@@ -4,14 +4,13 @@ import ChatWindow from "./ChatWindow.jsx";
 import AuthModal from "./AuthModal.jsx";
 import { MyContext } from "./MyContext.jsx";
 import { ThemeContext } from "./ThemeContext.jsx";
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { v1 as uuidv1 } from "uuid";
 import axios from 'axios';
-import Cookies from 'js-cookie';
 
 // ─── Axios Base URL ───────────────────────────────────────
 // In development: Vite proxy handles /api → localhost:8080
-// In production: VITE_API_URL points to your Render backend URL
+// In production: VITE_API_URL points to your deployed backend URL
 axios.defaults.baseURL = import.meta.env.VITE_API_URL || '';
 axios.defaults.withCredentials = true;
 
@@ -33,6 +32,46 @@ function App() {
     // Theme state
     const [theme, setTheme] = useState('dark');
 
+    const fetchUserThreads = useCallback(async () => {
+        try {
+            const response = await axios.get('/api/thread');
+            const filteredData = response.data.map(thread => ({
+                threadId: thread.threadId,
+                title: thread.title
+            }));
+            setAllThreads(filteredData);
+        } catch (error) {
+            console.error('Failed to fetch threads:', error);
+        }
+    }, []);
+
+    const updateUserTheme = useCallback(async (newTheme) => {
+        if (!user) return;
+        try {
+            await axios.put('/api/auth/theme', { theme: newTheme });
+        } catch (error) {
+            console.error('Failed to update theme:', error);
+        }
+    }, [user]);
+
+    // Session restoration: the auth token lives in an httpOnly cookie, which
+    // JavaScript cannot read directly. The browser sends it automatically on
+    // this request, so asking the backend to verify it is the only reliable
+    // way to know whether a session exists.
+    const checkAuth = async () => {
+        try {
+            const response = await axios.get('/api/auth/me');
+            setUser(response.data.user);
+            setTheme(response.data.user.theme || 'dark');
+        } catch {
+            // No valid session cookie — this is the normal logged-out state,
+            // not an unexpected failure, so it isn't logged as an error.
+            setUser(null);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     useEffect(() => {
         checkAuth();
     }, []);
@@ -43,25 +82,7 @@ function App() {
         if (user) {
             updateUserTheme(theme);
         }
-    }, [theme, user]);
-
-    const checkAuth = async () => {
-        try {
-            const token = Cookies.get('token');
-            if (!token) {
-                setLoading(false);
-                return;
-            }
-            const response = await axios.get('/api/auth/me');
-            setUser(response.data.user);
-            setTheme(response.data.user.theme || 'dark');
-        } catch (error) {
-            console.error('Auth check failed:', error);
-            Cookies.remove('token');
-        } finally {
-            setLoading(false);
-        }
-    };
+    }, [theme, user, updateUserTheme]);
 
     const handleAuth = async (userData) => {
         try {
@@ -80,50 +101,22 @@ function App() {
     const handleLogout = async () => {
         try {
             await axios.post('/api/auth/logout');
-            setUser(null);
-            Cookies.remove('token');
-            setAllThreads([]);
-            setPrevChats([]);
-            setCurrThreadId(uuidv1());
-            setNewChat(true);
-            setPrompt("");
-            setReply(null);
-            delete axios.defaults.headers.common['Authorization'];
         } catch (error) {
             console.error('Logout error:', error);
-            setUser(null);
-            Cookies.remove('token');
-            setAllThreads([]);
-            setPrevChats([]);
-            setCurrThreadId(uuidv1());
-            setNewChat(true);
         }
-    };
-
-    const updateUserTheme = async (newTheme) => {
-        if (!user) return;
-        try {
-            await axios.put('/api/auth/theme', { theme: newTheme });
-        } catch (error) {
-            console.error('Failed to update theme:', error);
-        }
+        // The session cookie is cleared server-side either way; always reset
+        // local state so the UI reflects a logged-out session.
+        setUser(null);
+        setAllThreads([]);
+        setPrevChats([]);
+        setCurrThreadId(uuidv1());
+        setNewChat(true);
+        setPrompt("");
+        setReply(null);
     };
 
     const toggleTheme = () => {
         setTheme(prev => prev === 'dark' ? 'light' : 'dark');
-    };
-
-    const fetchUserThreads = async () => {
-        try {
-            const response = await axios.get('/api/thread');
-            const filteredData = response.data.map(thread => ({
-                threadId: thread.threadId,
-                title: thread.title
-            }));
-            setAllThreads(filteredData);
-        } catch (error) {
-            console.error('Failed to fetch threads:', error);
-        }
     };
 
     const providerValues = {

@@ -10,13 +10,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fortawesome/fontawesome-free": "^7.3.1",
     "axios": "^1.13.6",
     "highlight.js": "^11.11.1",
-    "js-cookie": "^3.0.5",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-markdown": "^10.1.0",
-    "react-spinners": "^0.17.0",
     "rehype-highlight": "^7.0.2",
     "uuid": "^13.0.0"
   },
