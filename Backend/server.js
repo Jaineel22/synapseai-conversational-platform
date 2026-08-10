@@ -30,7 +30,6 @@ const connectDB = async () => {
     try {
         await mongoose.connect(process.env.MONGODB_URI, {
             tls: true,
-            tlsAllowInvalidCertificates: true,
             serverSelectionTimeoutMS: 5000,
             socketTimeoutMS: 45000,
         });
@@ -62,11 +61,15 @@ app.use((req, res) => {
 });
 
 // ─── Global Error Handler ─────────────────────────────────
+// Client (4xx) error messages are safe to forward as-is — they describe
+// what the caller did wrong. Server (5xx) errors may contain internal
+// details (stack traces, driver messages), so only a generic message is
+// sent to the client; the full error is still logged server-side.
 app.use((err, req, res, next) => {
-    console.error('Unhandled error:', err.message);
-    res.status(err.status || 500).json({
-        error: err.message || 'Internal server error'
-    });
+    console.error('Unhandled error:', err);
+    const status = err.status || 500;
+    const message = status < 500 ? (err.message || 'Bad request') : 'Internal server error';
+    res.status(status).json({ error: message });
 });
 
 // ─── Local Dev: start server normally ─────────────────────
