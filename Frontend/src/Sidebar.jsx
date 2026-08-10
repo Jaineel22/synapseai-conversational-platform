@@ -19,7 +19,7 @@ function Sidebar() {
 
   useEffect(() => {
     if (user) fetchUserThreads();
-  }, [currThreadId, user]);
+  }, [currThreadId, user, fetchUserThreads]);
 
   // Close pending delete if user clicks elsewhere
   useEffect(() => {

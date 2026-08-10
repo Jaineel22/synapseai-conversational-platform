@@ -20,11 +20,11 @@ function NeuralLoader() {
 }
 
 function ChatWindow() {
-  const { 
-    prompt, setPrompt, 
-    reply, setReply, 
-    currThreadId, 
-    setPrevChats, 
+  const {
+    prompt, setPrompt,
+    setReply,
+    currThreadId,
+    setPrevChats,
     setNewChat,
     user,
     handleLogout
