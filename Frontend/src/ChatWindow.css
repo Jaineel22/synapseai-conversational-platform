@@ -65,11 +65,41 @@
   background: rgba(240, 244, 255, 0.7);
 }
 
+.navbar-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* Hidden on desktop — the sidebar is always visible there. Shown once the
+   sidebar becomes an off-canvas drawer (see the breakpoint at the bottom
+   of this file and Sidebar.css). */
+.sidebar-toggle {
+  display: none;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  border-radius: 10px;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.sidebar-toggle:hover {
+  border-color: var(--border-glow);
+  color: var(--plasma-blue);
+}
+
 .navbar-brand {
   display: flex;
   align-items: center;
   gap: 10px;
-  cursor: pointer;
+  min-width: 0;
 }
 
 .navbar-brand-icon {
@@ -139,6 +169,10 @@
 /* User Icon */
 .userIconDiv {
   cursor: pointer;
+  background: transparent;
+  border: none;
+  padding: 0;
+  border-radius: 10px;
 }
 
 .userIcon {
@@ -192,6 +226,7 @@
 }
 
 .dropDownItem {
+  width: 100%;
   font-size: 0.85rem;
   padding: 9px 12px;
   border-radius: 8px;
@@ -200,6 +235,10 @@
   align-items: center;
   gap: 10px;
   color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  font-family: inherit;
+  text-align: left;
   transition: all 0.2s ease;
 }
 
@@ -269,6 +308,13 @@
   color: var(--synapse-teal);
 }
 
+.neural-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  animation: typing-bounce 1.4s ease infinite;
+}
+
 /* ---- INPUT AREA ---- */
 .chatInput {
   width: 100%;
@@ -287,7 +333,7 @@
   max-width: 720px;
   position: relative;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
 }
 
 /* Animated glow border */
@@ -313,63 +359,39 @@
   animation: none;
 }
 
-input {
+.inputBox textarea {
   width: 100%;
   border: 1px solid var(--border-color);
   background: var(--input-bg);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
-  padding: 16px 58px 16px 20px;
+  padding: 14px 58px 14px 20px;
   font-size: 0.9rem;
   font-family: 'Exo 2', sans-serif;
+  line-height: 1.5;
   border-radius: 14px;
   color: var(--text-primary);
   position: relative;
   z-index: 1;
+  resize: none;
+  overflow-y: auto;
+  max-height: 200px;
   transition: border-color 0.3s ease, box-shadow 0.3s ease !important;
 }
 
-input::placeholder {
+.inputBox textarea::placeholder {
   color: var(--text-muted);
   font-style: italic;
 }
 
-input:focus {
+.inputBox textarea:focus {
   outline: none;
   border-color: var(--border-glow);
   box-shadow: 0 0 0 3px rgba(0, 102, 255, 0.1);
 }
 
-/* Send button */
-#submit {
-  cursor: pointer;
-  position: absolute;
-  right: 10px;
-  z-index: 2;
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
-  background: var(--grad-primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 2px 12px var(--plasma-blue-glow);
-  transition: all 0.3s var(--transition-snap);
-}
-
-#submit:hover {
-  transform: scale(1.08) rotate(-5deg);
-  box-shadow: 0 4px 20px var(--plasma-blue-glow);
-}
-
-#submit i {
-  font-size: 15px;
-  color: white !important;
-  transition: transform 0.3s ease;
-}
-
-#submit:hover i {
-  transform: translateX(1px) translateY(-1px);
+.inputBox textarea:disabled {
+  opacity: 0.7;
 }
 
 .info {
@@ -380,59 +402,10 @@ input:focus {
   text-align: center;
 }
 
-/* ---- MODALS ---- */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.7);
-  backdrop-filter: blur(8px);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
-  animation: fadeIn 0.25s ease;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-.modal {
-  background: var(--bg-glass);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid var(--border-color);
-  padding: 2rem;
-  border-radius: 18px;
-  width: 90%;
-  max-width: 420px;
-  color: var(--text-primary);
-  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.4), 0 0 40px var(--plasma-blue-glow);
-  animation: fadeInScale 0.3s var(--transition-snap);
-  position: relative;
-  overflow: hidden;
-}
-
-.modal::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: var(--grad-primary);
-}
-
-.modal h3 {
-  margin-bottom: 1.5rem;
-  font-size: 1.1rem;
-  font-weight: 600;
-  background: var(--grad-primary);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
+/* ---- MODALS ----
+   Generic overlay/dialog shell (.modal-overlay, .modal, .close-modal)
+   lives in Modal.css now, shared by every modal in the app. Only the
+   Settings/Upgrade-specific content styles stay here. */
 
 .settings-item {
   display: flex;
@@ -473,30 +446,6 @@ input:focus {
   box-shadow: 0 0 12px var(--plasma-blue-glow) !important;
   color: var(--plasma-blue) !important;
   transform: none !important;
-}
-
-.close-modal {
-  width: 100%;
-  padding: 0.75rem !important;
-  margin-top: 1.25rem !important;
-  background: var(--grad-primary) !important;
-  color: white !important;
-  border: none !important;
-  border-radius: 10px !important;
-  font-family: 'Exo 2', sans-serif;
-  font-size: 0.9rem !important;
-  font-weight: 600 !important;
-  cursor: pointer;
-  transition: all 0.3s ease !important;
-  display: flex !important;
-  justify-content: center !important;
-  box-shadow: 0 4px 15px var(--plasma-blue-glow);
-}
-
-.close-modal:hover {
-  opacity: 0.9;
-  transform: translateY(-1px) !important;
-  box-shadow: 0 6px 25px var(--plasma-blue-glow) !important;
 }
 
 /* Plan cards */
@@ -546,6 +495,7 @@ input:focus {
   cursor: pointer;
   position: absolute;
   right: 10px;
+  bottom: 10px;
   z-index: 2;
   width: 38px;
   height: 38px;
@@ -775,6 +725,41 @@ input:focus {
   justify-content: center !important;
   box-shadow: 0 3px 12px var(--plasma-blue-glow);
   transition: all 0.2s ease !important;
+}
+
+/* ─── RESPONSIVE ─────────────────────────────────────────────────────────────── */
+
+@media (max-width: 900px) {
+  .sidebar-toggle {
+    display: flex;
+  }
+
+  .navbar {
+    padding: 0 1rem;
+  }
+
+  .navbar-model-tag {
+    display: none; /* decorative, first to go when space is tight */
+  }
+
+  .dropDown {
+    right: 1rem;
+  }
+
+  .chatInput {
+    padding: 0 1rem 1rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .navbar-brand-name {
+    font-size: 0.75rem;
+  }
+
+  .dropDown {
+    width: calc(100vw - 2rem);
+    right: 1rem;
+  }
 }
 
 .upgrade-cta:hover {

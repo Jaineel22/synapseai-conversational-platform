@@ -1,0 +1,205 @@
+/* ========================================
+   AUTH SCREEN — Split branding / form layout
+   ======================================== */
+
+.auth-screen {
+  display: flex;
+  height: 100vh;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* ---- LEFT: branding + depth scene ---- */
+.auth-screen-brand {
+  flex: 1.1;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--grad-bg);
+  overflow: hidden;
+  padding: var(--space-8);
+}
+
+.brand-scene {
+  position: absolute;
+  inset: 0;
+  perspective: 1200px;
+  overflow: hidden;
+}
+
+.brand-grid {
+  position: absolute;
+  inset: -20%;
+  background-image:
+    linear-gradient(var(--neural-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--neural-line) 1px, transparent 1px);
+  background-size: 48px 48px;
+  transform: rotateX(60deg) translateZ(-200px);
+  mask-image: radial-gradient(ellipse at center, black 0%, transparent 70%);
+  -webkit-mask-image: radial-gradient(ellipse at center, black 0%, transparent 70%);
+  animation: grid-drift 20s linear infinite;
+}
+
+@keyframes grid-drift {
+  from { background-position: 0 0; }
+  to { background-position: 48px 96px; }
+}
+
+.brand-orb {
+  position: absolute;
+  border-radius: 50%;
+}
+
+.brand-orb-core {
+  width: 260px;
+  height: 260px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(circle at 35% 30%, rgba(0, 102, 255, 0.9), rgba(124, 58, 237, 0.45) 45%, transparent 75%);
+  filter: blur(4px);
+  box-shadow: 0 0 120px rgba(0, 102, 255, 0.45), 0 0 220px rgba(124, 58, 237, 0.2);
+  animation: orb-breathe 6s ease-in-out infinite;
+}
+
+@keyframes orb-breathe {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); }
+  50% { transform: translate(-50%, -50%) scale(1.08); }
+}
+
+.brand-orb-ring-1,
+.brand-orb-ring-2 {
+  left: 50%;
+  top: 50%;
+  border: 1px solid rgba(0, 102, 255, 0.22);
+}
+
+.brand-orb-ring-1 {
+  width: 380px;
+  height: 380px;
+  transform: translate(-50%, -50%) rotateX(70deg) rotateZ(0deg);
+  animation: ring-spin-1 26s linear infinite;
+}
+
+.brand-orb-ring-2 {
+  width: 480px;
+  height: 480px;
+  border-color: rgba(124, 58, 237, 0.16);
+  transform: translate(-50%, -50%) rotateX(70deg) rotateZ(0deg);
+  animation: ring-spin-2 34s linear infinite;
+}
+
+@keyframes ring-spin-1 {
+  from { transform: translate(-50%, -50%) rotateX(70deg) rotateZ(0deg); }
+  to { transform: translate(-50%, -50%) rotateX(70deg) rotateZ(360deg); }
+}
+
+@keyframes ring-spin-2 {
+  from { transform: translate(-50%, -50%) rotateX(70deg) rotateZ(360deg); }
+  to { transform: translate(-50%, -50%) rotateX(70deg) rotateZ(0deg); }
+}
+
+.brand-node {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--synapse-teal);
+  box-shadow: 0 0 12px var(--synapse-teal-glow);
+  animation: node-float 5s ease-in-out infinite;
+}
+
+.brand-node-1 { top: 28%; left: 30%; animation-delay: 0s; }
+.brand-node-2 {
+  top: 64%; left: 68%; animation-delay: 1.4s;
+  background: var(--plasma-blue); box-shadow: 0 0 12px var(--plasma-blue-glow);
+}
+.brand-node-3 {
+  top: 70%; left: 28%; animation-delay: 2.8s;
+  background: var(--bio-pink); box-shadow: 0 0 12px var(--bio-pink-glow);
+}
+
+@keyframes node-float {
+  0%, 100% { transform: translateY(0); opacity: 0.55; }
+  50% { transform: translateY(-14px); opacity: 1; }
+}
+
+.brand-copy {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  max-width: 380px;
+}
+
+.brand-logo {
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-lg);
+  background: var(--accent-gradient);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  color: white;
+  margin: 0 auto var(--space-5);
+  box-shadow: 0 0 40px var(--accent-soft);
+}
+
+.brand-copy h1 {
+  font-size: 2.1rem;
+  font-weight: 700;
+  background: var(--accent-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: var(--space-3);
+  letter-spacing: -0.5px;
+}
+
+.brand-copy p {
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+  line-height: 1.65;
+}
+
+/* ---- RIGHT: the form panel ---- */
+.auth-screen-panel {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  background: var(--background);
+  overflow-y: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand-grid, .brand-orb-core, .brand-orb-ring-1, .brand-orb-ring-2, .brand-node {
+    animation: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .auth-screen {
+    flex-direction: column;
+    height: auto;
+    min-height: 100vh;
+    overflow-y: auto;
+  }
+  .auth-screen-brand {
+    flex: none;
+    min-height: 220px;
+    padding: var(--space-6);
+  }
+  .brand-copy p { display: none; }
+  .brand-copy h1 { font-size: 1.6rem; }
+  .brand-logo { width: 48px; height: 48px; font-size: 20px; margin-bottom: var(--space-3); }
+  .brand-orb-core { width: 160px; height: 160px; }
+  .brand-orb-ring-1 { width: 240px; height: 240px; }
+  .brand-orb-ring-2 { width: 300px; height: 300px; }
+  .auth-screen-panel {
+    flex: none;
+    padding: var(--space-6) var(--space-4) var(--space-8);
+  }
+}
