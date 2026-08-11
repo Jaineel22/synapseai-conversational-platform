@@ -7,6 +7,16 @@ import mongoose from 'mongoose';
 import chatRoutes from './routes/chat.js';
 import authRoutes from './routes/auth.js';
 
+// ─── Required Environment Variables ───────────────────────
+// Fail loudly at startup rather than running in a broken state where every
+// request would silently 500, or CORS/auth would silently misbehave with
+// an undefined origin/secret.
+const REQUIRED_ENV_VARS = ['MONGODB_URI', 'JWT_SECRET', 'GEMINI_API_KEY', 'CLIENT_ORIGIN'];
+const missingEnvVars = REQUIRED_ENV_VARS.filter((key) => !process.env[key]);
+if (missingEnvVars.length > 0) {
+    throw new Error(`Missing required environment variable(s): ${missingEnvVars.join(', ')}`);
+}
+
 const app = express();
 const PORT = process.env.PORT || 8080;
 
@@ -17,6 +27,14 @@ app.use(cors({
     origin: process.env.CLIENT_ORIGIN,
     credentials: true
 }));
+
+// ─── Health Check ──────────────────────────────────────────
+// Mounted before the DB-connect middleware so it reflects whether the
+// process itself is up, independent of database connectivity. This is
+// what a host's health checker (e.g. Render) should poll.
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'ok' });
+});
 
 // ─── MongoDB Connection ────────────────────────────────────
 // Cached connection — important for serverless environments
@@ -72,12 +90,27 @@ app.use((err, req, res, next) => {
     res.status(status).json({ error: message });
 });
 
-// ─── Local Dev: start server normally ─────────────────────
-// In production (Vercel), the export below is used instead
-if (process.env.NODE_ENV !== 'production') {
-    app.listen(PORT, () => {
-        console.log(`Server running on http://localhost:${PORT}`);
-    });
+// ─── Long-running process: local dev, Render, or any normal Node host ─────
+// `VERCEL` is set automatically by Vercel's build/runtime environment — it's
+// the reliable signal for "running as a Vercel serverless function". Using
+// NODE_ENV here instead would be wrong: Render also runs with
+// NODE_ENV=production, and would then never call app.listen() either.
+//
+// The DB connection is made eagerly (not just lazily per-request) so a
+// misconfigured/unreachable database fails the deploy immediately and
+// visibly, instead of the process appearing healthy while every real
+// request silently 500s.
+if (!process.env.VERCEL) {
+    connectDB()
+        .then(() => {
+            app.listen(PORT, '0.0.0.0', () => {
+                console.log(`Server running on http://localhost:${PORT}`);
+            });
+        })
+        .catch(() => {
+            console.error('Fatal: could not connect to MongoDB at startup. Exiting.');
+            process.exit(1);
+        });
 }
 
 // ─── Vercel Serverless Export ─────────────────────────────
