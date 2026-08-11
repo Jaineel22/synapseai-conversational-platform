@@ -4,6 +4,9 @@ import ChatWindow from '../ChatWindow.jsx';
 import { MyContext } from '../MyContext.jsx';
 import { ThemeContext } from '../ThemeContext.jsx';
 import { ToastContext } from '../ToastContext.jsx';
+import * as documentsApi from '../api/documents.js';
+
+vi.mock('../api/documents.js');
 
 // Builds a fake fetch Response whose body streams the given SSE events,
 // matching exactly what Backend/routes/chat.js actually sends.
@@ -64,6 +67,9 @@ function renderChatWindow(contextOverrides = {}) {
 describe('ChatWindow — streaming chat consumption', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    // Default: no documents, so the "Ask my documents" toggle stays
+    // disabled unless a specific test overrides this.
+    documentsApi.listDocuments.mockResolvedValue([]);
   });
 
   it('sends the message, streams accumulating text into setReply, then commits the finished message', async () => {
@@ -162,6 +168,73 @@ describe('ChatWindow — streaming chat consumption', () => {
 
     await waitFor(() => {
       expect(capturedSignal.aborted).toBe(true);
+    });
+  });
+});
+
+describe('ChatWindow — "Ask my documents" (RAG) mode', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('disables the knowledge toggle when the user has no ready documents', async () => {
+    documentsApi.listDocuments.mockResolvedValue([]);
+    renderChatWindow();
+
+    const toggle = await screen.findByRole('button', { name: /ask my documents/i });
+    expect(toggle).toBeDisabled();
+  });
+
+  it('enables the knowledge toggle once at least one document is ready', async () => {
+    documentsApi.listDocuments.mockResolvedValue([
+      { id: '1', filename: 'handbook.pdf', status: 'ready' },
+      { id: '2', filename: 'still-processing.txt', status: 'processing' },
+    ]);
+    renderChatWindow();
+
+    const toggle = await screen.findByRole('button', { name: /ask my documents/i });
+    await waitFor(() => expect(toggle).not.toBeDisabled());
+    expect(screen.getByText('1 document available')).toBeInTheDocument();
+  });
+
+  it('includes useKnowledge:true in the chat request only once the toggle is turned on', async () => {
+    documentsApi.listDocuments.mockResolvedValue([{ id: '1', filename: 'handbook.pdf', status: 'ready' }]);
+    window.fetch = vi.fn().mockResolvedValue(
+      sseResponse([{ event: 'chunk', data: { text: 'ok' } }, { event: 'done', data: { sources: [] } }]),
+    );
+
+    renderChatWindow();
+    const toggle = await screen.findByRole('button', { name: /ask my documents/i });
+    await waitFor(() => expect(toggle).not.toBeDisabled());
+
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole('button', { name: /send message/i }));
+
+    await waitFor(() => expect(window.fetch).toHaveBeenCalled());
+    const [, options] = window.fetch.mock.calls[0];
+    expect(JSON.parse(options.body)).toEqual({ message: 'Hello there', threadId: 'test-thread', useKnowledge: true });
+  });
+
+  it('attaches returned source citations to the persisted assistant message', async () => {
+    documentsApi.listDocuments.mockResolvedValue([{ id: '1', filename: 'handbook.pdf', status: 'ready' }]);
+    const sources = [{ index: 1, documentId: 'd1', filename: 'handbook.pdf', page: 4, score: 0.9 }];
+    window.fetch = vi.fn().mockResolvedValue(
+      sseResponse([{ event: 'chunk', data: { text: 'answer' } }, { event: 'done', data: { sources } }]),
+    );
+
+    const ctx = renderChatWindow();
+    const toggle = await screen.findByRole('button', { name: /ask my documents/i });
+    await waitFor(() => expect(toggle).not.toBeDisabled());
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole('button', { name: /send message/i }));
+
+    await waitFor(() => {
+      const updaterCalls = ctx.setPrevChats.mock.calls.map((c) => c[0]);
+      const withSources = updaterCalls.some((fn) => {
+        const result = fn([]);
+        return result.some((m) => m.role === 'assistant' && m.sources?.length === 1);
+      });
+      expect(withSources).toBe(true);
     });
   });
 });
