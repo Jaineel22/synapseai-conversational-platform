@@ -1,6 +1,7 @@
 import express from 'express';
 import "dotenv/config";
 import cors from "cors";
+import helmet from "helmet";
 import cookieParser from 'cookie-parser';
 import mongoose from 'mongoose';
 
@@ -20,12 +21,29 @@ if (missingEnvVars.length > 0) {
 const app = express();
 const PORT = process.env.PORT || 8080;
 
+// Render sits behind a proxy (Cloudflare, per its own infrastructure), so
+// Express needs to trust exactly one hop of X-Forwarded-For to see the
+// real client IP. This matters both for accurate rate limiting below and
+// for correctness of req.ip generally. `1` (not `true`) is deliberate —
+// trusting an unbounded number of hops would let a client spoof its own
+// IP via a forged header.
+app.set('trust proxy', 1);
+
 // ─── Middleware ────────────────────────────────────────────
 app.use(express.json());
 app.use(cookieParser());
 app.use(cors({
     origin: process.env.CLIENT_ORIGIN,
     credentials: true
+}));
+app.use(helmet({
+    // This is a pure JSON API consumed by a frontend on a different
+    // origin (Vercel) — Helmet's default same-origin resource policy
+    // would make browsers refuse to let that frontend read responses
+    // even though CORS explicitly permits it. CSP is left at its default;
+    // it's a no-op for a JSON-only API (nothing is ever rendered as HTML)
+    // but harmless to keep.
+    crossOriginResourcePolicy: { policy: "cross-origin" },
 }));
 
 // ─── Health Check ──────────────────────────────────────────
@@ -46,8 +64,12 @@ const connectDB = async () => {
     if (isConnected) return;
 
     try {
+        // No explicit `tls` option: the `mongodb+srv://` scheme Atlas uses
+        // already enables TLS by default in the driver. Forcing `tls: true`
+        // here was redundant for that case and actively broke connecting to
+        // a local/non-TLS MongoDB (e.g. the in-memory instance used by
+        // tests) — found while writing the test suite.
         await mongoose.connect(process.env.MONGODB_URI, {
-            tls: true,
             serverSelectionTimeoutMS: 5000,
             socketTimeoutMS: 45000,
         });

@@ -22,6 +22,12 @@ const SYSTEM_INSTRUCTION = [
     "If you are not sure about something, say so instead of guessing.",
 ].join(" ");
 
+// Hard ceiling on how long a single Gemini call is allowed to run. Without
+// this, a stalled request (e.g. the undiagnosed cold-start hang observed
+// during Phase 0's baseline testing) would leave the client waiting
+// indefinitely with no error ever surfaced. Overridable via env for tuning.
+const GEMINI_TIMEOUT_MS = Number(process.env.GEMINI_TIMEOUT_MS) || 60_000;
+
 // Mongoose stores roles as "user" | "assistant" (matches the app's own
 // domain language). The Gemini API requires "user" | "model" for turns.
 // This mapping is the only place that translation happens.
@@ -75,14 +81,18 @@ export async function* streamGeminiResponse(contents, { abortSignal } = {}) {
         throw new Error("GEMINI_API_KEY not found in environment variables");
     }
 
+    const timeoutSignal = AbortSignal.timeout(GEMINI_TIMEOUT_MS);
+    const combinedSignal = abortSignal ? AbortSignal.any([abortSignal, timeoutSignal]) : timeoutSignal;
+
     let stream;
     try {
         stream = await ai.models.generateContentStream({
             model: MODEL,
             contents,
-            config: { systemInstruction: SYSTEM_INSTRUCTION, abortSignal },
+            config: { systemInstruction: SYSTEM_INSTRUCTION, abortSignal: combinedSignal },
         });
     } catch (err) {
+        if (timeoutSignal.aborted) throw new Error("Gemini request timed out. Please try again.");
         throw describeGeminiError(err);
     }
 
@@ -93,9 +103,11 @@ export async function* streamGeminiResponse(contents, { abortSignal } = {}) {
             }
         }
     } catch (err) {
-        // AbortError is the expected shape when the caller intentionally
-        // stopped the stream — let it propagate as-is so the caller can
-        // distinguish "user stopped it" from "Gemini actually failed".
+        if (timeoutSignal.aborted) throw new Error("Gemini request timed out. Please try again.");
+        // AbortError at this point came from the caller's own abortSignal
+        // (client disconnected / clicked Stop) — let it propagate as-is so
+        // the caller can distinguish "user stopped it" from "Gemini
+        // actually failed".
         if (err?.name === "AbortError") throw err;
         throw describeGeminiError(err);
     }

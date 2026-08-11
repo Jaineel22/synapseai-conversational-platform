@@ -1,12 +1,20 @@
 import express from "express";
+import { z } from "zod";
 import Thread from "../models/Thread.js";
 import { streamGeminiResponse, buildGeminiContents, MAX_CONTEXT_MESSAGES } from "../utils/gemini.js";
 import authMiddleware from "../middleware/auth.js";
+import validateBody from "../middleware/validate.js";
+import { chatLimiter } from "../middleware/rateLimiter.js";
 
 const router = express.Router();
 
 // All routes below require authentication
 router.use(authMiddleware);
+
+const chatSchema = z.object({
+  threadId: z.string().trim().min(1, "threadId is required").max(200, "threadId is too long"),
+  message: z.string().trim().min(1, "Message cannot be empty").max(8000, "Message is too long (max 8000 characters)"),
+});
 
 // ─────────────────────────────────────────
 // GET /api/thread
@@ -77,15 +85,8 @@ router.delete("/thread/:threadId", async (req, res) => {
 //     `chunk` events (incremental text), followed by exactly one of
 //     `done` or `error`.
 // ─────────────────────────────────────────
-router.post("/chat", async (req, res) => {
+router.post("/chat", chatLimiter, validateBody(chatSchema), async (req, res) => {
   const { threadId, message } = req.body;
-
-  if (
-    !threadId || typeof threadId !== "string" ||
-    !message || typeof message !== "string" || !message.trim()
-  ) {
-    return res.status(400).json({ error: "Missing required fields" });
-  }
 
   // Persist the user's message first, before touching Gemini at all, so it
   // survives even if generation fails outright (same guarantee as before).

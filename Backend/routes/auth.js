@@ -1,9 +1,11 @@
 import express from "express";
+import { z } from "zod";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import mongoose from "mongoose";
 import User from "../models/User.js";
 import authMiddleware from "../middleware/auth.js";
+import validateBody from "../middleware/validate.js";
+import { authLimiter } from "../middleware/rateLimiter.js";
 
 const router = express.Router();
 
@@ -15,17 +17,27 @@ const cookieOptions = {
     secure: process.env.NODE_ENV === 'production',  // HTTPS only in production
 };
 
+const registerSchema = z.object({
+    name: z.string().trim().min(1, "Name is required").max(100, "Name is too long"),
+    email: z.string().trim().toLowerCase().email("Invalid email address"),
+    password: z.string().min(8, "Password must be at least 8 characters").max(200, "Password is too long"),
+});
+
+const loginSchema = z.object({
+    email: z.string().trim().toLowerCase().email("Invalid email address"),
+    password: z.string().min(1, "Password is required"),
+});
+
+const themeSchema = z.object({
+    theme: z.enum(["light", "dark"]),
+});
+
 // ─────────────────────────────────────────
 // POST /api/auth/register
 // ─────────────────────────────────────────
-router.post("/register", async (req, res) => {
+router.post("/register", authLimiter, validateBody(registerSchema), async (req, res) => {
     try {
         const { name, email, password } = req.body;
-
-        if (!name || !email || !password ||
-            typeof name !== 'string' || typeof email !== 'string' || typeof password !== 'string') {
-            return res.status(400).json({ error: "All fields are required" });
-        }
 
         const existingUser = await User.findOne({ email });
         if (existingUser) {
@@ -49,7 +61,6 @@ router.post("/register", async (req, res) => {
         res.status(201).json({
             message: "User created successfully",
             user: { id: user._id, name: user.name, email: user.email, theme: user.theme },
-            token,
         });
     } catch (error) {
         if (error.name === "MongoServerError" && error.code === 11000) {
@@ -63,13 +74,9 @@ router.post("/register", async (req, res) => {
 // ─────────────────────────────────────────
 // POST /api/auth/login
 // ─────────────────────────────────────────
-router.post("/login", async (req, res) => {
+router.post("/login", authLimiter, validateBody(loginSchema), async (req, res) => {
     try {
         const { email, password } = req.body;
-
-        if (!email || !password || typeof email !== 'string' || typeof password !== 'string') {
-            return res.status(400).json({ error: "Email and password are required" });
-        }
 
         const user = await User.findOne({ email });
         if (!user) {
@@ -92,7 +99,6 @@ router.post("/login", async (req, res) => {
         res.json({
             message: "Login successful",
             user: { id: user._id, name: user.name, email: user.email, theme: user.theme },
-            token,
         });
     } catch (error) {
         console.error('Login error:', error);
@@ -127,13 +133,9 @@ router.get("/me", authMiddleware, async (req, res) => {
 // ─────────────────────────────────────────
 // PUT /api/auth/theme
 // ─────────────────────────────────────────
-router.put("/theme", authMiddleware, async (req, res) => {
+router.put("/theme", authMiddleware, validateBody(themeSchema), async (req, res) => {
     try {
         const { theme } = req.body;
-
-        if (!["light", "dark"].includes(theme)) {
-            return res.status(400).json({ error: "Invalid theme value" });
-        }
 
         await User.findByIdAndUpdate(req.userId, { theme });
         res.json({ message: "Theme updated successfully", theme });
