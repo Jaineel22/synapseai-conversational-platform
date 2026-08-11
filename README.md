@@ -1,330 +1,460 @@
 # SynapseAI
 
-An authenticated AI conversational platform with Retrieval-Augmented Generation, built on Google Gemini — real-time streaming responses, persistent per-user conversation history, document ingestion with semantic search, grounded/cited answers, and JWT/httpOnly-cookie authentication.
+An AI-powered knowledge assistant that combines authenticated conversational chat, persistent multi-turn threads, Retrieval-Augmented Generation over user-uploaded documents, and Gemini tool/function calling — with the same production concerns (ownership isolation, rate limiting, structured error handling, CI) a real product would need, not just a demo.
 
 ![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black)
 ![Node.js](https://img.shields.io/badge/Node.js-Express_5-339933?style=flat-square&logo=node.js&logoColor=white)
 ![MongoDB](https://img.shields.io/badge/MongoDB-Mongoose-47A248?style=flat-square&logo=mongodb&logoColor=white)
 ![Gemini](https://img.shields.io/badge/Google-Gemini_AI-4285F4?style=flat-square&logo=google&logoColor=white)
 ![Vitest](https://img.shields.io/badge/Tested_with-Vitest-6E9F18?style=flat-square&logo=vitest&logoColor=white)
+![CI](https://github.com/Jaineel22/synapseai-conversational-platform/actions/workflows/ci.yml/badge.svg)
 
 ---
 
 ## Table of Contents
 
-- [What it does](#what-it-does)
-- [Architecture](#architecture)
-- [Features](#features)
-- [Tech stack](#tech-stack)
-- [Authentication](#authentication)
-- [AI architecture](#ai-architecture)
-- [RAG: document knowledge base](#rag-document-knowledge-base)
-- [Reliability, security & observability](#reliability-security--observability)
-- [Database](#database)
-- [API reference](#api-reference)
-- [Project structure](#project-structure)
-- [Local setup](#local-setup)
-- [Environment variables](#environment-variables)
-- [Testing](#testing)
-- [Deployment](#deployment)
+1. [Project Overview](#1-project-overview)
+2. [Key Features](#2-key-features)
+3. [System Architecture](#3-system-architecture)
+4. [RAG Pipeline](#4-rag-pipeline)
+5. [AI Chat Flow](#5-ai-chat-flow)
+6. [Authentication Architecture](#6-authentication-architecture)
+7. [Technology Stack](#7-technology-stack)
+8. [Project Structure](#8-project-structure)
+9. [API Overview](#9-api-overview)
+10. [Testing](#10-testing)
+11. [Local Setup](#11-local-setup)
+12. [Environment Variables](#12-environment-variables)
+13. [Deployment](#13-deployment)
+14. [Security Considerations](#14-security-considerations)
+15. [Engineering Challenges / Technical Decisions](#15-engineering-challenges--technical-decisions)
+16. [Future Improvements](#16-future-improvements)
+17. [Screenshots](#17-screenshots)
+18. [License](#18-license)
 
 ---
 
-## What it does
+## 1. Project Overview
 
-SynapseAI is a private, account-based chat interface over Google Gemini. Users register, log in, and get their own space of persistent conversation threads. Unlike a bare API wrapper around an LLM, the backend maintains real multi-turn context — the model actually receives the recent conversation history on every turn, not just the latest message — and responses stream to the browser incrementally as they're generated.
+SynapseAI is a private, account-based chat application built on Google Gemini. It started as a conversational chat app and grew into something closer to a knowledge platform: users can upload their own documents (PDF, TXT, Markdown, DOCX) and ask questions that are answered *grounded in that content*, with the response citing exactly which document and page the answer came from.
 
-Users can also upload their own documents (PDF, TXT, Markdown, DOCX) and ask questions grounded in them: the backend extracts and chunks the text, generates real semantic embeddings, retrieves the most relevant chunks for a question via vector similarity search, and has Gemini answer using that retrieved context — with structured source citations (document + page) back to the client. Retrieval is strictly isolated per user; nobody can retrieve another user's document content.
+What makes it more than a wrapper around an LLM API:
 
-## Architecture
+- **Real multi-turn memory** — the model receives a bounded window of actual prior conversation on every turn, not just the latest message.
+- **Real Retrieval-Augmented Generation** — documents are extracted, chunked, embedded with Gemini's embedding model, and retrieved by cosine similarity at query time; nothing is faked or simulated.
+- **Real streaming** — responses render token-by-token via Server-Sent Events as Gemini generates them.
+- **Real tool use** — Gemini can call a server-executed function mid-conversation when the question needs it.
+- **Real multi-tenancy** — every thread, document, and chunk is scoped to its owning user at the database-query level, verified by dedicated cross-user isolation tests.
+
+It's intended as a portfolio/resume project that demonstrates end-to-end AI product engineering: not just "call the LLM API," but the surrounding system — auth, data modeling, retrieval, security, testing, and deployment — that separates a prototype from something closer to shippable.
+
+## 2. Key Features
+
+| Feature | Status |
+|---|---|
+| Email/password auth with JWT + httpOnly cookies | ✅ Implemented |
+| Persistent per-user chat threads (create/switch/delete) | ✅ Implemented |
+| Real conversation memory (bounded context window) | ✅ Implemented |
+| Real-time SSE streaming responses | ✅ Implemented |
+| Stop/abort an in-progress generation | ✅ Implemented |
+| Document upload (PDF / TXT / Markdown / DOCX) | ✅ Implemented |
+| Text extraction (per-page for PDFs) | ✅ Implemented |
+| Semantic chunking (paragraph/sentence-aware, configurable) | ✅ Implemented |
+| Real Gemini embeddings (`gemini-embedding-001`) | ✅ Implemented |
+| Cosine-similarity semantic retrieval, ownership-scoped | ✅ Implemented |
+| RAG-grounded answers with structured source citations | ✅ Implemented |
+| Gemini function/tool calling (`get_current_datetime`) | ✅ Implemented |
+| Per-user document/thread data isolation | ✅ Implemented |
+| Rate limiting (auth / chat / document upload) | ✅ Implemented |
+| Request validation (Zod) on every mutating route | ✅ Implemented |
+| File upload validation (extension + magic-byte content sniffing + size cap) | ✅ Implemented |
+| Security headers (Helmet) + strict single-origin CORS | ✅ Implemented |
+| Dark/light theme, responsive layout | ✅ Implemented |
+| Toast notification system (deduplicated) | ✅ Implemented |
+| Automated test suite (backend + frontend) | ✅ Implemented |
+| CI (GitHub Actions: tests + lint + build on every push) | ✅ Implemented |
+| Deployed (Vercel + Render + MongoDB Atlas) | ✅ Implemented |
+| Dedicated vector database | ❌ Not implemented (deliberate — see [§15](#15-engineering-challenges--technical-decisions)) |
+| Multi-tool/agentic framework | ❌ Not implemented (one tool, deliberately scoped — see [§15](#15-engineering-challenges--technical-decisions)) |
+
+## 3. System Architecture
+
+```mermaid
+flowchart TD
+    User(["User — Browser"])
+    FE["React + Vite Frontend\n(Vercel)"]
+    API["Express API\n(Render)"]
+    AUTH["Auth middleware\nJWT verification"]
+    VALID["Validation\n(Zod) + Rate limiting"]
+    CHAT["Chat service\nthread + memory + SSE"]
+    RAG["RAG services\nextract / chunk / embed / retrieve"]
+    DOCS["Document service\nupload / status / ownership"]
+    TOOLS["Tool-calling loop\nget_current_datetime"]
+    GEMINI["Google Gemini\n(@google/genai)\ngeneration + embeddings"]
+    DB[("MongoDB Atlas\nusers / threads / documents / chunks")]
+
+    User -- "HTTPS + credentials cookie" --> FE
+    FE -- "HTTPS + credentials cookie" --> API
+    API --> AUTH --> VALID
+    VALID --> CHAT
+    VALID --> DOCS
+    CHAT --> RAG
+    CHAT --> TOOLS
+    DOCS --> RAG
+    CHAT --> GEMINI
+    RAG --> GEMINI
+    TOOLS --> GEMINI
+    CHAT --> DB
+    DOCS --> DB
+    RAG --> DB
+```
+
+Frontend and backend are independently deployed on different origins; the backend is a normal long-running Express process on Render (not serverless), reachable at a fixed URL with a `GET /health` endpoint for host health checks. **The frontend never talks to MongoDB or Gemini directly** — every protected operation goes through the Express API.
+
+## 4. RAG Pipeline
+
+```mermaid
+flowchart TD
+    A["Document Upload\n(PDF / TXT / MD / DOCX)"] --> B["Validation\nextension allowlist + magic-byte content sniffing + size cap"]
+    B --> C["Text Extraction\npdf-parse (per-page) / mammoth / plain read"]
+    C --> D["Chunking\nparagraph-first, sentence-fallback,\nconfigurable size + overlap"]
+    D --> E["Embedding Generation\nGemini gemini-embedding-001, batched"]
+    E --> F[("Embedding Storage\nMongoDB — chunk text + vector + page + owner")]
+    F --> G["Document marked ready\n(or failed, with chunks cleaned up)"]
+
+    Q["User Query\nAsk my documents mode enabled"] --> H["Query Embedding\nGemini, RETRIEVAL_QUERY task type"]
+    H --> I["Similarity Retrieval\ncosine similarity, in-process,\nfiltered by userId at the DB query"]
+    F -.-> I
+    I --> J["Top-K Chunks\nabove similarity floor"]
+    J --> K["Prompt Construction\nlabeled [Source N] context block\n+ grounding system instruction"]
+    K --> L["Gemini Generation\nstreamed"]
+    L --> M["Grounded Response\n+ structured source citations"]
+```
+
+Each stage is a separate, independently-tested module (`services/textExtraction.js`, `chunking.js`, `embeddingService.js`, `retrieval.js`, `ragPrompt.js`) — not one large function — so each is unit-testable in isolation and swappable later.
+
+**Why cosine similarity in-app instead of a vector database.** MongoDB Atlas Vector Search was evaluated and is the natural upgrade path, but wasn't used: it requires a manually-created Atlas Search index that can't be verified from the codebase, and its `$vectorSearch` aggregation stage doesn't run against the in-memory MongoDB the test suite uses — which would make retrieval untestable without a live Atlas cluster. Instead, chunk embeddings are stored as plain number arrays and similarity is computed in the Node process over chunks the MongoDB query has already scoped to the requesting user. This adds zero infrastructure and is fully unit-testable, at the documented cost of reading every one of a user's chunks per query — appropriate at a personal/small-team document-set scale, and isolated behind one module (`services/retrieval.js`) if it ever needs to change.
+
+## 5. AI Chat Flow
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant FE as React Frontend
+    participant API as Express API
+    participant Auth as authMiddleware
+    participant DB as MongoDB
+    participant RAG as Retrieval
+    participant Gemini as Gemini
+
+    U->>FE: types a message, hits send
+    FE->>API: POST /api/chat over SSE, cookie attached
+    API->>Auth: verify JWT
+    Auth-->>API: req.userId
+    API->>DB: save user message, scoped to userId
+    alt Ask my documents is enabled
+        API->>RAG: embed query, retrieve top-K chunks, userId-scoped
+        RAG-->>API: chunks plus citations
+    end
+    API->>Gemini: generateContentStream with context and tools
+    alt Gemini requests a tool call
+        Gemini-->>API: functionCall
+        API->>API: execute tool server-side, deterministic
+        API->>Gemini: functionResponse, one follow-up call
+    end
+    Gemini-->>API: streamed text deltas
+    API-->>FE: SSE chunk events
+    FE-->>U: renders incrementally
+    API->>DB: persist complete reply and sources once
+    API-->>FE: SSE done event, with sources
+```
+
+Conversation memory is a bounded sliding window (`MAX_CONTEXT_MESSAGES`, default 20) of the thread's own messages — not the full history — so a long-running thread doesn't grow the request payload or token usage indefinitely.
+
+## 6. Authentication Architecture
+
+```mermaid
+flowchart LR
+    A["POST /register or /login"] --> B["bcrypt hash/compare"]
+    B --> C["jwt.sign({userId}, JWT_SECRET, 7d)"]
+    C --> D["Set-Cookie: token=...\nhttpOnly, Secure in prod,\nSameSite=None in prod"]
+    D --> E["Every protected request:\nauthMiddleware verifies JWT,\nsets req.userId"]
+    E --> F["Every query scoped to req.userId\n(never a client-supplied id)"]
+```
+
+- Passwords are hashed with **bcrypt** — never stored or compared as plaintext.
+- The JWT is transmitted **only** via the httpOnly cookie — never in a JSON response body, never readable by frontend JavaScript.
+- `secure`/`sameSite` cookie flags are environment-aware: production (Vercel frontend ↔ Render backend, different origins) requires `SameSite=None; Secure`; local dev (same-origin via the Vite proxy) uses `SameSite=Strict`.
+- `authMiddleware` is the single source of `req.userId` for every protected route — no route trusts a client-supplied user identifier for authorization.
+- Session restoration on page reload works via `GET /api/auth/me` (which succeeds/fails based on the cookie the browser sends automatically) — the frontend never attempts to read the cookie itself, because it can't.
+
+## 7. Technology Stack
+
+**Frontend**
+
+| Technology | Role |
+|---|---|
+| React 19 | UI |
+| Vite 7 | Dev server + build |
+| Axios | REST API calls (auth, threads, documents) |
+| `fetch` + `ReadableStream` | SSE consumption for streamed chat (Axios doesn't support streaming responses the way this needs) |
+| React Markdown + rehype-highlight + highlight.js | Markdown/code rendering in chat |
+| Font Awesome | Iconography |
+| uuid | Client-generated thread IDs |
+
+**Backend**
+
+| Technology | Role |
+|---|---|
+| Node.js + Express 5 | HTTP API |
+| Mongoose (MongoDB) | Data modeling/persistence |
+| jsonwebtoken | JWT signing/verification |
+| bcryptjs | Password hashing |
+| Zod | Request body validation |
+| express-rate-limit | Rate limiting |
+| Helmet | Security headers |
+| cors | Origin-restricted CORS |
+| multer | Multipart file upload (in-memory only) |
+| pdf-parse / mammoth | PDF / DOCX text extraction |
+
+**AI/ML**
+
+| Technology | Role |
+|---|---|
+| `@google/genai` (Google Gemini) | Chat generation (`gemini-3-flash-preview`), embeddings (`gemini-embedding-001`), function calling — single provider for everything AI-related |
+
+**Database**
+
+| Technology | Role |
+|---|---|
+| MongoDB Atlas | Users, threads (with embedded messages), documents, chunks (with embedding vectors) |
+
+**Testing**
+
+| Technology | Role |
+|---|---|
+| Vitest | Test runner, both packages |
+| Supertest | Backend HTTP integration tests |
+| mongodb-memory-server | Real (in-memory) MongoDB for backend tests — no mocked DB layer |
+| React Testing Library | Frontend component tests |
+
+**Deployment / DevOps**
+
+| Technology | Role |
+|---|---|
+| Vercel | Frontend hosting |
+| Render | Backend hosting (persistent Node web service) |
+| GitHub Actions | CI — tests + lint + build on every push/PR |
+
+**Developer tooling**
+
+| Technology | Role |
+|---|---|
+| ESLint | Frontend linting |
+| nodemon | Backend dev auto-restart |
+
+## 8. Project Structure
 
 ```
-Vercel (React + Vite)  --HTTPS, credentials-->  Render (Node + Express)  --+--> MongoDB Atlas (users/threads/documents/chunks)
-                                                                             +--> Google Gemini (@google/genai — generation + embeddings)
+SynapseAI/
+├── Backend/
+│   ├── server.js                 # Entry point, middleware, health check, startup
+│   ├── config/rag.js              # All RAG/document-pipeline tuning constants
+│   ├── middleware/
+│   │   ├── auth.js                # JWT verification
+│   │   ├── validate.js            # Zod request-body validation
+│   │   └── rateLimiter.js         # Auth + chat + document-upload rate limits
+│   ├── models/
+│   │   ├── User.js / Thread.js
+│   │   └── Document.js / Chunk.js
+│   ├── routes/
+│   │   ├── auth.js / chat.js (normal + RAG-augmented) / documents.js
+│   ├── services/
+│   │   ├── textExtraction.js, chunking.js, embeddingService.js
+│   │   ├── documentProcessing.js  # Orchestrates extract → chunk → embed → persist
+│   │   ├── retrieval.js           # Ownership-scoped cosine-similarity search
+│   │   ├── ragPrompt.js           # Grounding system instruction + prompt building
+│   │   └── tools.js               # Function-calling tool declarations + executors
+│   ├── utils/gemini.js            # Streaming, context building, tool-call loop
+│   └── tests/                     # Vitest + Supertest integration tests
+│
+├── Frontend/src/
+│   ├── App.jsx                    # Auth bootstrap, theme, top-level view
+│   ├── Sidebar.jsx / ChatWindow.jsx / Chat.jsx
+│   ├── DocumentsPanel.jsx         # Upload / status / delete
+│   ├── api/documents.js           # Documents API client
+│   ├── ToastProvider.jsx          # Deduplicated notification system
+│   ├── AuthScreen.jsx / AuthPanel.jsx
+│   └── tests/                     # Vitest + React Testing Library
+│
+├── docs/ARCHITECTURE.md           # Deeper flow-by-flow architecture reference
+└── .github/workflows/ci.yml       # CI: backend tests, frontend tests/lint/build
 ```
 
-The frontend and backend are deployed independently on different origins; the backend is a normal long-running Express process (not serverless), reachable at a fixed URL, with a `GET /health` endpoint for the host's health checks.
+## 9. API Overview
 
-**RAG pipeline** (see [RAG: document knowledge base](#rag-document-knowledge-base) for details):
+**Auth** — `/api/auth`
 
-```
-User uploads a document
-  ↓
-Express (multer, in-memory) → extension + magic-byte validation
-  ↓
-Text extraction (pdf-parse / mammoth / plain read) — per-page where available
-  ↓
-Chunking (paragraph/sentence-aware, configurable size + overlap)
-  ↓
-Embedding (Gemini gemini-embedding-001, batched)
-  ↓
-Chunks + embeddings stored in MongoDB, Document marked "ready"
-
-User asks a question with "Ask my documents" on
-  ↓
-Query embedded (Gemini, RETRIEVAL_QUERY)
-  ↓
-Cosine similarity search over the user's own chunks (ownership enforced in the DB query)
-  ↓
-Top-K chunks above a similarity floor → labeled context block
-  ↓
-Gemini (with a grounding + prompt-injection-boundary system instruction)
-  ↓
-Streamed, cited answer
-```
-
-## Features
-
-- Email/password registration and login, JWT session in an httpOnly cookie
-- Session restoration on page reload (via `GET /api/auth/me`, not by reading the cookie client-side — it can't be, by design)
-- Persistent, per-user chat threads — create, switch, delete
-- **Real conversation memory**: recent thread history (bounded, configurable) is sent to Gemini as context on every turn, with a centralized system instruction
-- **Real Server-Sent-Events streaming**: responses render incrementally as Gemini generates them, not a client-side animation over an already-complete response
-- Stop-generation control (client-side abort of an in-progress response)
-- **Retrieval-Augmented Generation**: upload PDF/TXT/Markdown/DOCX documents, ask questions grounded in them, get structured source citations (document + page) — see [below](#rag-document-knowledge-base)
-- Dark / light theme, persisted per account
-- Markdown + syntax-highlighted code block rendering
-- Input validation (Zod) on every request body
-- Rate limiting on authentication, chat, and document-upload endpoints
-- Standard security headers (Helmet) and strict single-origin CORS
-
-## Tech stack
-
-**Frontend** — React 19, Vite, Axios, `fetch`/`ReadableStream` for SSE consumption, React Markdown, rehype-highlight, Font Awesome, uuid
-
-**Backend** — Node.js, Express 5, Mongoose (MongoDB), JWT, bcryptjs, Zod, express-rate-limit, Helmet, `@google/genai` (chat generation **and** embeddings), multer, pdf-parse, mammoth
-
-**Testing** — Vitest across both packages; Supertest + an in-memory MongoDB instance for backend integration tests (with the Gemini SDK mocked — no test ever makes a real API call); React Testing Library for frontend component tests
-
-**Deployment** — Frontend on Vercel, backend on Render (a normal Node web service, not serverless), MongoDB Atlas
-
-## Authentication
-
-JWT, signed server-side and stored in an `httpOnly` cookie — never exposed to frontend JavaScript. `secure`/`sameSite` cookie flags are environment-aware, correct for the cross-origin Vercel↔Render split in production. Passwords are hashed with bcrypt. Every thread/chat operation is scoped server-side to the authenticated user's ID — a user cannot read, modify, or delete another user's data, and a client-supplied thread ID is never trusted for ownership.
-
-## AI architecture
-
-- **Provider**: Google Gemini, via the `@google/genai` SDK (`ai.models.generateContentStream`) — one provider, no unused SDKs.
-- **Memory**: on each `POST /api/chat`, the last N messages (`MAX_CONTEXT_MESSAGES`, default 20, env-overridable) from the thread — including the message just sent — are converted to Gemini's `{role, parts}` format and sent as conversation context. The app's own `"assistant"` role is translated to Gemini's required `"model"` at this one boundary.
-- **System instruction**: centralized in `Backend/utils/gemini.js`, not scattered across route files.
-- **Streaming**: `generateContentStream` yields incremental text deltas, forwarded to the client as SSE `chunk` events as they arrive; the complete reply is persisted to MongoDB exactly once, only after generation finishes successfully — individual chunks are never written to the database.
-- **Timeouts & cancellation**: a hard timeout (`GEMINI_TIMEOUT_MS`, default 60s) bounds every call. A client disconnect or explicit Stop click aborts the stream and skips persisting an incomplete reply.
-- **Error handling**: Gemini's `ApiError` status code drives user-facing error messages (rate-limited, invalid key, model unavailable, etc.) rather than fragile string matching.
-- **Function calling**: one small, deliberately minimal tool (`get_current_datetime`, see `Backend/services/tools.js`) is offered to Gemini on every chat turn. When Gemini decides to call it (e.g. "what's today's date"), the call is executed server-side — a fixed, hand-written function with validated arguments, no arbitrary code execution — and the result is sent back in exactly one follow-up request to produce the final streamed answer, bounding the chain to a single tool hop. This is deliberately scoped small: it exists to demonstrate real tool use (not just text generation), not to become a general agent framework. Adding another tool means adding one declaration + one executor in `tools.js` — nothing else in the request pipeline needs to change.
-
-## Reliability, security & observability
-
-- **Error responses**: every route follows the same `{ error: "..." }` JSON shape. Client (4xx) messages are safe to show as-is; unexpected server (5xx) errors are logged in full server-side but only ever return a generic "Internal server error" to the client — no stack traces, driver messages, or internals leak into a response.
-- **Document processing failure handling**: if any stage (extraction, chunking, embedding, or the final DB write) fails, the document is marked `failed` with a user-safe error message, and any chunks already written by a partially-succeeded step are explicitly deleted — a document never ends up in a state where it looks `failed` but still has retrievable chunks, or where a transient DB error between "chunks saved" and "status updated" leaves stale data behind.
-- **Gemini/embedding failures**: 429 (rate limit), 401/403 (bad key), and 5xx (upstream outage) are each mapped to a specific, honest user-facing message rather than a generic failure — both for chat generation (`utils/gemini.js`) and embeddings (`services/embeddingService.js`), which are rate-limited independently of each other.
-- **Logging**: lightweight and structured-by-convention rather than a logging framework — every log line is prefixed by category (`[chat]`, `[documents]`, `[auth]`, `[rate-limit]`, `[error]`) and includes just enough identifiers (route, status, thread/document id, error category) to diagnose an issue, never request bodies, tokens, API keys, or document contents.
-- **Rate limiting**: auth (per-IP), chat (per-account), and document upload (per-account) each have independent limits, sized to the actual resource being protected (a paid Gemini quota, in chat's case) rather than one blanket number.
-- **CORS**: a single, explicit origin (`CLIENT_ORIGIN`) with credentials enabled — never a wildcard, which the `cors` package itself refuses to combine with credentials.
-- **Ownership isolation**: every thread/document/chunk query is scoped to the authenticated `userId` at the database-query level (never as an app-layer filter applied after fetching), covered by dedicated cross-user isolation tests on both the RAG retrieval layer and the documents/chat APIs.
-
-## RAG: document knowledge base
-
-### Why in-app cosine similarity instead of a vector database
-
-MongoDB (Atlas) is already this project's only database. MongoDB Atlas Vector Search was considered and is the natural upgrade path, but was **not** used for Phase 5 for two concrete reasons: it requires manually creating a vector search index via the Atlas dashboard (a step that can't be verified or automated from the codebase), and its `$vectorSearch` aggregation stage doesn't run against the `mongodb-memory-server` instance the test suite uses locally/in CI — meaning retrieval logic would be untestable without a live Atlas cluster.
-
-Instead, chunk embeddings are stored as plain number arrays on each chunk document, and semantic search computes cosine similarity **in the Node process**, over chunks pre-filtered to the requesting user by the MongoDB query itself. This adds zero infrastructure, runs identically in dev/test/prod, and is fully unit-testable. The tradeoff is that it reads every one of a user's (optionally document-scoped) chunks per query — a deliberate, documented choice that's appropriate at a personal/small-team document-set scale. If retrieval volume ever outgrows that, `Backend/services/retrieval.js` is the single place to swap in `$vectorSearch` (or an external vector DB) without changing its input/output contract.
-
-### Pipeline
-
-1. **Upload** (`POST /api/documents`) — multer holds the file in memory only (nothing is ever written to disk — Render's filesystem is ephemeral anyway). Extension is checked against an allowlist (`.pdf`, `.txt`, `.md`, `.docx`), and the actual file content is sniffed (PDF/DOCX magic bytes; txt/md rejected if they look like binary data) — the client-declared MIME type is never trusted alone. Size is capped (`DOCUMENT_MAX_FILE_SIZE_MB`).
-2. **Processing** (`Backend/services/documentProcessing.js`) — runs after the upload response is already sent (the client gets the new `Document` back immediately with `status: "processing"`); no queue/Redis involved, just an async function the route doesn't await. Each stage is its own module:
-   - `services/textExtraction.js` — `pdf-parse` (per-page, via a custom page-render callback) / `mammoth` (docx) / plain UTF-8 read (txt/md).
-   - `services/chunking.js` — paragraph-first, sentence-fallback chunking with configurable size/overlap (`RAG_CHUNK_SIZE`, `RAG_CHUNK_OVERLAP`); a chunk shorter than `RAG_MIN_CHUNK_SIZE` is merged into its neighbor rather than emitted as a near-empty orphan. PDF chunking is done per-page, so each chunk carries an exact page number.
-   - `services/embeddingService.js` — wraps `ai.models.embedContent` (Gemini `gemini-embedding-001`, `taskType: RETRIEVAL_DOCUMENT`), batched (`EMBEDDING_BATCH_SIZE`) so a whole document costs a handful of API calls, not one per chunk.
-   - Chunks + embeddings are saved, and the `Document` is marked `ready` (with `chunkCount`/`pageCount`) or `failed` (with a user-safe `error` message — never a raw stack trace or parser exception).
-3. **Retrieval** (`Backend/services/retrieval.js`) — the query is embedded with `taskType: RETRIEVAL_QUERY` (the asymmetric counterpart to `RETRIEVAL_DOCUMENT`), compared via cosine similarity against the user's own chunks (`Chunk.find({ userId, ... })` — ownership is a MongoDB query condition, not an app-layer filter applied after the fact), filtered by a similarity floor (`RAG_MIN_SIMILARITY`) and capped at `RAG_TOP_K`.
-4. **Generation** (`Backend/services/ragPrompt.js`, wired into the existing `POST /api/chat`) — retrieved chunks are formatted into a labeled `[Source N]` context block (each capped at `RAG_MAX_CHUNK_CHARS_IN_PROMPT`) and appended to the current turn only; earlier conversation turns are untouched, so multi-turn memory keeps working. A RAG-specific system instruction explicitly tells Gemini retrieved text is **untrusted reference data, not instructions** — a real (not foolproof) prompt-injection defense against a document containing text like "ignore previous instructions."
-5. **Citations** — structured source metadata (`filename`, `page`, similarity `score`) is sent to the client on the SSE `done` event and persisted on the assistant's message in MongoDB, so citations survive a page reload.
-
-### Using it
-
-The chat composer has an "Ask my documents" toggle (disabled until at least one document finishes processing). When it's on, `POST /api/chat` is sent `useKnowledge: true` (and optionally `documentIds` to scope to specific documents); when it's off, the request body is unchanged from before Phase 5 and no retrieval happens at all.
-
-## Database
-
-MongoDB via Mongoose, four collections:
-
-- **User** — `name`, `email` (unique), `password` (bcrypt hash), `theme`, `createdAt`
-- **Thread** — `threadId` (unique), `userId` (ref User), `title`, `messages[]` (embedded subdocuments: `role`, `content`, `sources[]` — optional, only on RAG-grounded replies — `timestamp`), `createdAt`, `updatedAt`
-- **Document** — `userId` (ref User), `filename`, `fileType` (`pdf`/`txt`/`md`/`docx`), `fileSize`, `status` (`processing`/`ready`/`failed`), `error`, `chunkCount`, `pageCount`, `createdAt`, `updatedAt`. Raw file bytes are never persisted — only this metadata and the chunks derived from it.
-- **Chunk** — `documentId` (ref Document), `userId` (ref User — denormalized so retrieval never needs a join to enforce ownership), `text`, `embedding[]` (numbers), `page`, `chunkIndex`, `createdAt`
-
-## API reference
-
-### Auth — `/api/auth`
-
-| Method | Endpoint | Auth | Description |
+| Method | Route | Auth | Purpose |
 |---|---|---|---|
-| POST | `/register` | No | Create a new account |
+| POST | `/register` | No | Create an account |
 | POST | `/login` | No | Log in, receive session cookie |
 | POST | `/logout` | No | Clear the session cookie |
 | GET | `/me` | ✅ | Get the current authenticated user |
 | PUT | `/theme` | ✅ | Update theme preference |
 
-### Threads & chat — `/api`
+**Threads & Chat** — `/api`
 
-| Method | Endpoint | Auth | Description |
+| Method | Route | Auth | Purpose |
 |---|---|---|---|
 | GET | `/thread` | ✅ | List the current user's threads |
 | GET | `/thread/:threadId` | ✅ | Get a thread's messages |
 | DELETE | `/thread/:threadId` | ✅ | Delete a thread |
-| POST | `/chat` | ✅ | Send a message; streams the reply back over SSE. Body accepts optional `useKnowledge: boolean` and `documentIds: string[]` to enable RAG for that turn — omitted entirely, behavior is identical to pre-Phase-5 |
+| POST | `/chat` | ✅ | Send a message; streams the reply over SSE. Optional `useKnowledge`/`documentIds` enable RAG for that turn |
 
-### Documents (RAG) — `/api/documents`
+**Documents (RAG)** — `/api/documents`
 
-| Method | Endpoint | Auth | Description |
+| Method | Route | Auth | Purpose |
 |---|---|---|---|
-| POST | `/` | ✅ | Upload a document (`multipart/form-data`, field name `file`); returns immediately with `status: "processing"` while extraction/chunking/embedding run in the background |
+| POST | `/` | ✅ | Upload a document (multipart); returns immediately with `status: "processing"` |
 | GET | `/` | ✅ | List the current user's documents |
 | GET | `/:id` | ✅ | Get one document's status/metadata |
-| DELETE | `/:id` | ✅ | Delete a document and cascade-delete its chunks |
+| DELETE | `/:id` | ✅ | Delete a document and its chunks |
 
-### Other
+**Other**
 
-| Method | Endpoint | Auth | Description |
+| Method | Route | Auth | Purpose |
 |---|---|---|---|
-| GET | `/health` | No | Liveness check (used by Render), independent of DB state |
+| GET | `/health` | No | Liveness check, independent of DB state |
 
-## Project structure
+## 10. Testing
 
-```
-SynapseAI/
-├── Backend/
-│   ├── server.js                # Entry point, middleware, health check, startup
-│   ├── config/
-│   │   └── rag.js               # All RAG/document-pipeline tuning constants, env-overridable
-│   ├── middleware/
-│   │   ├── auth.js              # JWT verification
-│   │   ├── validate.js          # Zod request-body validation
-│   │   └── rateLimiter.js       # Auth + chat + document-upload rate limits
-│   ├── models/
-│   │   ├── User.js
-│   │   ├── Thread.js
-│   │   ├── Document.js          # Uploaded document metadata + processing status
-│   │   └── Chunk.js             # Chunk text + embedding + page, owned by a Document/User
-│   ├── routes/
-│   │   ├── auth.js
-│   │   ├── chat.js              # Normal chat + RAG-augmented chat (same endpoint)
-│   │   └── documents.js         # Upload / list / get / delete
-│   ├── services/
-│   │   ├── textExtraction.js    # pdf-parse / mammoth / plain text, per-page where possible
-│   │   ├── chunking.js          # Paragraph/sentence-aware chunking
-│   │   ├── embeddingService.js  # Gemini embedContent wrapper (documents + queries)
-│   │   ├── documentProcessing.js # Orchestrates extract -> chunk -> embed -> persist
-│   │   ├── retrieval.js         # Ownership-scoped cosine-similarity search
-│   │   ├── ragPrompt.js         # Grounding system instruction + context-block prompt building
-│   │   └── tools.js             # Function-calling tool declarations + deterministic executors
-│   ├── utils/
-│   │   └── gemini.js            # Gemini streaming, context building, system instruction, tool-call loop
-│   └── tests/                   # Vitest + Supertest integration tests
-│
-├── .github/workflows/ci.yml     # Backend tests + frontend tests/lint/build on every push/PR
-├── docs/ARCHITECTURE.md         # Deeper flow-by-flow architecture reference
-│
-└── Frontend/
-    └── src/
-        ├── App.jsx              # Auth bootstrap, theme, top-level view
-        ├── MyContext.jsx / ThemeContext.jsx
-        ├── Sidebar.jsx          # Thread list & navigation
-        ├── ChatWindow.jsx       # Input, streaming consumption, Stop control, knowledge toggle
-        ├── Chat.jsx             # Message rendering + source citations
-        ├── DocumentsPanel.jsx   # Upload / status / delete modal
-        ├── api/documents.js     # Documents API client
-        ├── AuthScreen.jsx / AuthPanel.jsx  # Login / register form
-        └── tests/               # Vitest + React Testing Library component tests
-```
+**Framework**: Vitest across both packages — Supertest + a real in-memory MongoDB (`mongodb-memory-server`) for backend integration tests, React Testing Library for frontend component tests.
 
-## Local setup
+**What's covered**:
+- Auth: registration/login validation, session lifecycle, password hashing
+- Threads: CRUD, cross-user isolation
+- Chat: SSE streaming, persistence, conversation-memory window construction, rate limiting
+- RAG: text extraction (valid/empty/unsupported/corrupted documents), chunking (short/long text, overlap, page metadata), the embedding service (batching, ordering, error mapping), retrieval (real DB + deterministic fake vectors — ranking, similarity floor, top-K, ownership isolation), the documents API (upload validation, full processing pipeline to `ready`, cascading delete), RAG-augmented chat (prompt construction, citation propagation, graceful retrieval failure)
+- Document processing failure handling: embedding failure, unextractable documents, and a partial-failure race that could otherwise leave orphaned chunks
+- Function calling: tool execution, argument validation, error handling, the full call → execute → follow-up loop
+- Frontend: SSE stream consumption, the "Ask my documents" toggle, login/register form, sidebar delete confirmation, Documents panel states, source-citation rendering, toast deduplication
 
-**Prerequisites**: Node.js 18+, a MongoDB connection string (local or [Atlas](https://www.mongodb.com/cloud/atlas)), a [Gemini API key](https://aistudio.google.com/).
+**No test makes a real Gemini API call** — every AI call (generation, embeddings) is mocked with deterministic fixtures, so the suite is unaffected by API quota and runs identically in CI.
 
 ```bash
+cd Backend && npm test          # Vitest + Supertest, in-memory MongoDB
+cd Frontend && npm test         # Vitest + React Testing Library
+cd Frontend && npm run lint     # ESLint
+cd Frontend && npm run build    # Production build
+```
+
+**CI**: `.github/workflows/ci.yml` runs all of the above on every push/PR to `main`, as two independent jobs (backend, frontend), requiring no repository secrets.
+
+## 11. Local Setup
+
+**Prerequisites**: Node.js 20+, a MongoDB connection string (local or [Atlas](https://www.mongodb.com/cloud/atlas)), a [Gemini API key](https://aistudio.google.com/).
+
+```bash
+git clone https://github.com/Jaineel22/synapseai-conversational-platform.git
+cd synapseai-conversational-platform
+
 # Backend
 cd Backend
 npm install
-cp .env.example .env   # fill in real values — never commit .env
-npm run dev             # http://localhost:8080
+cp .env.example .env      # fill in real values — never commit .env
+npm run dev                # http://localhost:8080
 
 # Frontend (separate terminal)
 cd Frontend
 npm install
-npm run dev              # http://localhost:5173, proxies /api to localhost:8080
+npm run dev                 # http://localhost:5173, proxies /api to localhost:8080
+
+# Tests
+cd Backend && npm test
+cd Frontend && npm test && npm run lint && npm run build
 ```
 
-## Environment variables
+## 12. Environment Variables
 
-Names only — see `Backend/.env.example` / `Frontend/.env.example` for details, never commit real values.
+Names and placeholders only — see `Backend/.env.example` / `Frontend/.env.example` for full details. **Never commit real values.**
 
-**Backend** (`Backend/.env`)
+**Backend**
 
-| Variable | Required | Description |
+| Variable | Required | Purpose |
 |---|---|---|
-| `PORT` | No | Defaults to `8080`. Render sets this automatically in production. |
-| `NODE_ENV` | Effectively yes | Controls cookie `secure`/`sameSite` flags — must be `production` in any real deployment. |
-| `MONGODB_URI` | ✅ | MongoDB connection string. |
-| `JWT_SECRET` | ✅ | Secret for signing JWTs. |
-| `GEMINI_API_KEY` | ✅ | Google Gemini API key. |
-| `CLIENT_ORIGIN` | ✅ | Exact origin of the deployed frontend, used for CORS. |
-| `MAX_CONTEXT_MESSAGES` | No | Conversation-memory window size (default 20). |
-| `GEMINI_TIMEOUT_MS` | No | Per-request Gemini timeout (default 60000). |
-| `AUTH_RATE_LIMIT` | No | Requests per 15 min per IP on register/login (default 20). |
-| `CHAT_RATE_LIMIT` | No | Requests per minute per user on chat (default 15). |
-| `DOCUMENT_UPLOAD_RATE_LIMIT` | No | Uploads per 15 min per user (default 20). |
-| `EMBEDDING_MODEL` | No | Gemini embedding model (default `gemini-embedding-001`). |
-| `EMBEDDING_DIMENSIONS` | No | Stored embedding vector size (default 768) — see the note in `.env.example` before changing this on data that already exists. |
-| `EMBEDDING_BATCH_SIZE` | No | Chunk texts per embedding API call (default 50). |
-| `RAG_CHUNK_SIZE` / `RAG_CHUNK_OVERLAP` / `RAG_MIN_CHUNK_SIZE` | No | Chunking tuning (defaults 1200 / 200 / 100 characters). |
-| `RAG_TOP_K` | No | Chunks retrieved per RAG query (default 5). |
-| `RAG_MIN_SIMILARITY` | No | Cosine-similarity floor, 0-1 (default 0.55). |
-| `RAG_MAX_CHUNK_CHARS_IN_PROMPT` | No | Per-chunk cap when building the prompt (default 1500). |
-| `DOCUMENT_MAX_FILE_SIZE_MB` | No | Max upload size in MB (default 10). |
+| `MONGODB_URI` | ✅ | `mongodb+srv://<user>:<password>@<cluster>/...` |
+| `JWT_SECRET` | ✅ | Random secret for signing JWTs |
+| `GEMINI_API_KEY` | ✅ | Google Gemini API key |
+| `CLIENT_ORIGIN` | ✅ | Exact frontend origin, for CORS |
+| `NODE_ENV` | Effectively yes | Controls cookie `secure`/`sameSite` flags |
+| `PORT` | No | Defaults to 8080 |
+| `MAX_CONTEXT_MESSAGES`, `GEMINI_TIMEOUT_MS` | No | Chat tuning |
+| `AUTH_RATE_LIMIT`, `CHAT_RATE_LIMIT`, `DOCUMENT_UPLOAD_RATE_LIMIT` | No | Rate-limit tuning |
+| `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS`, `EMBEDDING_BATCH_SIZE` | No | Embedding tuning |
+| `RAG_CHUNK_SIZE`, `RAG_CHUNK_OVERLAP`, `RAG_MIN_CHUNK_SIZE` | No | Chunking tuning |
+| `RAG_TOP_K`, `RAG_MIN_SIMILARITY`, `RAG_MAX_CHUNK_CHARS_IN_PROMPT` | No | Retrieval tuning |
+| `DOCUMENT_MAX_FILE_SIZE_MB` | No | Upload size cap |
 
-**Frontend** (`Frontend/.env.development` / hosting platform settings)
+**Frontend**
 
-| Variable | Required | Description |
+| Variable | Required | Purpose |
 |---|---|---|
-| `VITE_API_URL` | No in dev | Backend origin. Empty locally (Vite proxy handles it); set to the deployed backend URL in production. |
+| `VITE_API_URL` | No in dev | Backend origin. Empty locally (Vite proxy handles it); the deployed backend's URL in production, set in the hosting platform's dashboard — never hardcoded |
 
-## Testing
+## 13. Deployment
 
-```bash
-# Backend — Supertest against a real Express app + in-memory MongoDB,
-# Gemini calls (both generation and embeddings) mocked — no network, no API cost
-cd Backend
-npm test
-
-# Frontend — React Testing Library
-cd Frontend
-npm test
-npm run lint
-npm run build
+```
+Frontend  →  Vercel   (static Vite build; VITE_API_URL baked in at build time)
+Backend   →  Render   (persistent Node/Express web service, GET /health)
+Database  →  MongoDB Atlas
+AI        →  Google Gemini API (@google/genai)
 ```
 
-Backend tests cover: registration/login validation and failure modes, session lifecycle, thread CRUD and cross-user isolation, streamed chat responses and persistence, conversation-memory context construction, rate limiting, text extraction (valid/empty/unsupported/corrupted documents), chunking (short/long text, overlap, page metadata preservation), the embedding service (batching, ordering, error mapping — mocked), retrieval (real in-memory MongoDB + fake deterministic vectors — ranking, similarity floor, top-K, ownership isolation, document-scoped search), the documents API (upload validation, full processing pipeline to `ready`, ownership isolation, cascading delete), and RAG chat (prompt construction, citation propagation, graceful retrieval failure, ownership). Frontend tests cover: SSE stream consumption and UI state transitions in `ChatWindow`, the "Ask my documents" toggle and its effect on the request body, the login/register form, the sidebar's two-step delete confirmation, the Documents panel (list/upload/error/delete states), and source-citation rendering in `Chat`.
+- The frontend and backend are on different origins in production; CORS on the backend is locked to the exact frontend origin (`CLIENT_ORIGIN`), never a wildcard.
+- `VITE_API_URL` is a **build-time** variable — changing it in the hosting dashboard requires a new deployment to take effect, since Vite bakes it into the static bundle.
+- No manual vector-database index/dashboard configuration is required — retrieval runs in-app against the same MongoDB connection every other feature uses.
+- Document uploads are processed entirely in memory; nothing is written to Render's (ephemeral) filesystem, so no persistent disk or object storage is required.
 
-No test in either package makes a real Gemini API call — every AI call (chat generation and embeddings) is mocked with deterministic fixtures, so the suite runs the same whether or not the Gemini API key currently has quota available.
+## 14. Security Considerations
 
-**CI**: `.github/workflows/ci.yml` runs on every push/PR to `main` — backend tests, and frontend tests + lint + build, as two independent jobs. Neither needs any repository secrets (backend tests use an in-memory MongoDB and a fully mocked Gemini SDK; the frontend build doesn't require `VITE_API_URL` to succeed), so it's a pure code-correctness gate, not a deployment step.
+- **Authentication**: JWT in an httpOnly cookie (never readable by JS, never returned in a response body), bcrypt-hashed passwords, environment-aware `secure`/`sameSite` cookie flags.
+- **Authorization / data isolation**: every thread, document, and chunk query is scoped to `req.userId` **at the database query itself** — never as an app-layer filter applied after fetching. Covered by dedicated cross-user isolation tests (a user cannot read, modify, retrieve, or cite another user's threads, documents, or chunks).
+- **CORS**: a single explicit origin with credentials enabled, never a wildcard.
+- **Input validation**: Zod schemas on every mutating route; file uploads are validated by extension allowlist **and** magic-byte content sniffing (the client-declared MIME type is never trusted alone), plus a hard size cap.
+- **Rate limiting**: independent limits on auth (per-IP), chat (per-account), and document upload (per-account), sized to the actual resource being protected.
+- **Prompt-injection boundary**: the RAG system instruction explicitly tells Gemini that retrieved document content is untrusted *data*, not instructions — a real, documented mitigation, not a claim of immunity.
+- **Error handling**: a consistent `{ error: "..." }` response shape; unexpected server errors are logged in full server-side but only ever return a generic message to the client — no stack traces, driver messages, or internals leak into a response.
+- **Secrets**: `.env` is gitignored and was never committed; `.env.example` files contain only variable names, no values. No Gemini key, JWT secret, or MongoDB credential is ever reachable from frontend code.
 
-See also [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for a flow-by-flow walkthrough (auth, thread, document ingestion, embedding, retrieval, RAG generation) and the major security boundaries.
+This is a solid baseline for a portfolio/resume project, not a claim of enterprise-grade security certification — there is no automated dependency-vulnerability scanning, no WAF, and no penetration testing has been performed.
 
-## Deployment
+## 15. Engineering Challenges / Technical Decisions
 
-- **Frontend**: Vercel. `VITE_API_URL` (a build-time variable) must point at the Render backend's URL. Root Directory must be set to `Frontend` in the Vercel project settings (this is a two-package repo with no root `package.json`).
-- **Backend**: Render, as a persistent Node web service — build command `npm install`, start command `npm start`, health check path `/health`. `NODE_ENV=production` must be set explicitly (Render doesn't guarantee this the way some platforms do, and the app's cookie security depends on it). A `vercel.json` is still present in `Backend/` as a dormant rollback path from before the Render migration; it isn't used in the current deployment.
-- **Database**: MongoDB Atlas. No manual index/dashboard configuration is required for RAG — retrieval runs in-app (see [RAG: document knowledge base](#rag-document-knowledge-base)) against the same collections/connection every other feature already uses.
-- **Document uploads**: processed entirely in memory; nothing is written to Render's (ephemeral) filesystem, so this requires no persistent disk or object storage add-on.
+- **Why RAG instead of just stuffing documents into the prompt.** Full documents don't fit in a context window reliably or cheaply. Chunking + retrieval means only the handful of passages actually relevant to a given question are sent to the model, keeping cost and latency bounded regardless of how much a user has uploaded.
+- **Why chunking is paragraph-first with a sentence-level fallback**, not a fixed-character split. A naive N-character split can cut a sentence in half, splitting its meaning across two chunks that then get embedded (and potentially retrieved) independently, degrading retrieval quality. Splitting on natural boundaries (falling back to sentences only when a paragraph alone exceeds the chunk size) keeps each chunk's embedding representative of one coherent idea.
+- **Why in-app cosine similarity instead of a vector database** — see [§4](#4-rag-pipeline). The short version: it keeps the whole system on infrastructure already in use, is fully testable without a live external service, and is an appropriate tradeoff at this project's scale — with the retrieval module isolated so it could be swapped later.
+- **Why retrieval happens before the SSE stream opens.** A retrieval failure (embedding quota exhausted, a transient DB error) can then be reported as a normal JSON error response, exactly like every other pre-generation failure, instead of inventing an SSE-only failure mode for one specific error class.
+- **Why user isolation is enforced at the query, not after fetching.** Filtering "after the fact" means another user's data was still loaded into the process at some point — a bug in the filter step, or a forgotten filter on a new endpoint, becomes a real data leak. Scoping every query by `userId` up front means there's no code path where that data is ever in memory to begin with.
+- **Why function calling is one tool, not a general agent framework.** The goal was to demonstrate that the Gemini integration supports real tool use — deterministic, server-executed, validated — without taking on the complexity and failure surface of a multi-step agent loop. The tool-calling logic lives entirely inside the existing streaming generator (`utils/gemini.js`), so it never touches the RAG prompt-construction code or the SSE consumption logic in the route handler; adding a second tool means adding one declaration and one executor function, nothing else changes.
+- **Why frontend and backend are deployed and reasoned about completely separately.** Vercel (static frontend) and Render (persistent backend process) have different operational models — the backend needed a real long-running process for SSE streaming, which a typical serverless function model handles poorly (cold starts, execution time limits). Keeping them as genuinely separate deployments, communicating only over HTTPS with cookie-based auth, also forced explicit handling of cross-origin cookies/CORS rather than letting a same-origin setup paper over it.
 
-### Troubleshooting: "chat/login works but documents don't load"
+## 16. Future Improvements
 
-This exact symptom has a specific known cause: `VITE_API_URL` in the Vercel project's environment variables still points at a **previous** backend deployment (e.g. an old Vercel-serverless backend from before a migration to Render), rather than the current one. Because that old deployment may still be alive and still serve auth/chat (routes that existed before a newer feature like RAG was added), login and chat can appear to work completely normally while any newer endpoint 404s/401s — there is no visible error pointing at the real cause.
+*(Not implemented — listed for transparency, not to imply they exist today.)*
 
-To confirm: open the deployed site, open browser devtools → Network tab, trigger the failing action, and check which **host** the failed request actually went to. (As of this fix, a network-level failure — wrong host, unreachable backend, CORS rejection — is also now logged to the console with the exact attempted URL; see `src/App.jsx`'s axios response interceptor.)
+- MongoDB Atlas Vector Search (or another vector store) if retrieval volume outgrows in-app cosine similarity
+- Background job queue for document processing instead of an in-process async task, if upload volume grows
+- Reranking / hybrid (keyword + semantic) retrieval for better precision on ambiguous queries
+- Retrieval evaluation metrics (precision/recall against a labeled query set) — none are currently measured
+- Additional Gemini tools beyond the current single deterministic utility
+- Frontend code-splitting (the production bundle currently exceeds the default 500kB chunk-size guideline)
+- Structured/centralized log aggregation (current logging is lightweight `console.*` with category prefixes, not a log pipeline)
 
-To fix: update `VITE_API_URL` in the Vercel project's environment variables to the current backend's exact origin, then trigger a new deployment (env var changes don't apply to already-built deployments — Vite bakes `VITE_API_URL` in at build time).
+## 17. Screenshots
+
+Not currently included in this repository.
+
+## 18. License
+
+No license file is currently included in this repository. All rights reserved by default under standard copyright unless/until a license is added.
