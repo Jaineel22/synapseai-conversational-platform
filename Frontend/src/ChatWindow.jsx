@@ -1,10 +1,12 @@
 import "./ChatWindow.css";
 import Chat from "./Chat.jsx";
 import Modal from "./Modal.jsx";
+import DocumentsPanel from "./DocumentsPanel.jsx";
 import { MyContext } from "./MyContext.jsx";
 import { ThemeContext } from "./ThemeContext.jsx";
 import { useToast } from "./useToast.js";
 import { useContext, useState, useEffect, useRef } from "react";
+import { listDocuments } from "./api/documents.js";
 
 // Same base URL logic as axios.defaults.baseURL in App.jsx — kept separate
 // because fetch (needed for reading a streaming response body) doesn't go
@@ -56,6 +58,9 @@ function ChatWindow() {
   const [isOpen, setIsOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showUpgrade, setShowUpgrade] = useState(false);
+  const [showDocuments, setShowDocuments] = useState(false);
+  const [readyDocCount, setReadyDocCount] = useState(0);
+  const [useKnowledge, setUseKnowledge] = useState(false);
   const inputRef = useRef(null);
   const abortControllerRef = useRef(null);
 
@@ -66,6 +71,21 @@ function ChatWindow() {
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT)}px`;
   }, [prompt]);
+
+  // Known on mount (and refreshed whenever the Documents panel closes) so
+  // the "Ask my documents" toggle can be disabled until at least one
+  // document has actually finished processing — no point offering
+  // knowledge mode against zero searchable documents.
+  useEffect(() => {
+    if (!user) return;
+    listDocuments()
+      .then((docs) => setReadyDocCount(docs.filter((d) => d.status === 'ready').length))
+      .catch(() => {}); // non-critical — toggle just stays disabled
+  }, [user]);
+
+  const handleDocumentsChanged = (docs) => {
+    setReadyDocCount(docs.filter((d) => d.status === 'ready').length);
+  };
 
   const getReply = async () => {
     if (!prompt.trim() || loading) return;
@@ -86,12 +106,17 @@ function ChatWindow() {
     abortControllerRef.current = controller;
     let streamStarted = false;
 
+    // Only sent when the user actually turned "Ask my documents" on — keeps
+    // the request body identical to before for every normal (non-RAG) turn.
+    const requestBody = { message: currentPrompt, threadId: currThreadId };
+    if (useKnowledge) requestBody.useKnowledge = true;
+
     try {
       const response = await fetch(`${API_BASE}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ message: currentPrompt, threadId: currThreadId }),
+        body: JSON.stringify(requestBody),
         signal: controller.signal,
       });
 
@@ -111,6 +136,7 @@ function ChatWindow() {
       let buffer = "";
       let accumulated = "";
       let streamError = null;
+      let sources = [];
 
       while (true) {
         const { value, done } = await reader.read();
@@ -129,6 +155,8 @@ function ChatWindow() {
             setReply(accumulated);
           } else if (event === "error") {
             streamError = payload.error || "Something went wrong";
+          } else if (event === "done") {
+            sources = payload.sources || [];
           }
         }
       }
@@ -136,8 +164,11 @@ function ChatWindow() {
       if (streamError) throw new Error(streamError);
       if (!accumulated) throw new Error("Empty response received");
 
-      // Move the finished reply into persisted history.
-      setPrevChats(prev => [...prev, { role: "assistant", content: accumulated }]);
+      // Move the finished reply into persisted history — citations travel
+      // with the message itself (only present when the turn was grounded).
+      const assistantMessage = { role: "assistant", content: accumulated };
+      if (sources.length > 0) assistantMessage.sources = sources;
+      setPrevChats(prev => [...prev, assistantMessage]);
       setReply(null);
     } catch (err) {
       if (err.name === "AbortError") {
@@ -220,6 +251,9 @@ function ChatWindow() {
         </div>
 
         <div className="nav-right">
+          <button className="theme-toggle" onClick={() => setShowDocuments(true)} aria-label="Manage your documents" title="Your documents">
+            <i className="fa-solid fa-book" aria-hidden="true"></i>
+          </button>
           <button className="theme-toggle" onClick={handleThemeToggle} aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} title="Toggle theme">
             <i className={`fa-solid ${theme === 'dark' ? 'fa-sun' : 'fa-moon'}`} aria-hidden="true"></i>
           </button>
@@ -266,6 +300,9 @@ function ChatWindow() {
       {/* Modals */}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
       {showUpgrade && <UpgradeModal onClose={() => setShowUpgrade(false)} />}
+      {showDocuments && (
+        <DocumentsPanel onClose={() => setShowDocuments(false)} onDocumentsChanged={handleDocumentsChanged} />
+      )}
 
       {/* Chat messages */}
       <div className="chat-area-wrapper">
@@ -278,6 +315,26 @@ function ChatWindow() {
 
       {/* Input */}
       <div className="chatInput">
+        <div className="knowledge-bar">
+          <button
+            type="button"
+            className={`knowledge-toggle-btn ${useKnowledge ? 'active' : ''}`}
+            onClick={() => setUseKnowledge((v) => !v)}
+            disabled={readyDocCount === 0}
+            aria-pressed={useKnowledge}
+            title={readyDocCount === 0 ? 'Upload a document to enable this' : 'Ground the reply in your uploaded documents'}
+          >
+            <i className="fa-solid fa-book" aria-hidden="true"></i>
+            Ask my documents
+          </button>
+          {readyDocCount === 0 ? (
+            <button type="button" className="knowledge-bar-hint" onClick={() => setShowDocuments(true)}>
+              Upload a document to get started
+            </button>
+          ) : (
+            <span className="knowledge-bar-hint">{readyDocCount} document{readyDocCount !== 1 ? 's' : ''} available</span>
+          )}
+        </div>
         <div className={`inputBox ${hasPrompt ? 'has-content' : ''} ${loading ? 'is-loading' : ''}`}>
           <textarea
             ref={inputRef}

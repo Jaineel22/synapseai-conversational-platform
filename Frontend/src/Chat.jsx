@@ -59,6 +59,28 @@ function CopyButton({ text }) {
   );
 }
 
+// Structured citations for a RAG-grounded reply — kept visually distinct
+// from the answer itself (a labeled strip below the message content, not
+// interleaved with it) so it reads as "here's where this came from" rather
+// than part of the model's own prose.
+function SourcesList({ sources }) {
+  return (
+    <div className="message-sources">
+      <span className="message-sources-label">
+        <i className="fa-solid fa-book-open" aria-hidden="true"></i> Sources
+      </span>
+      <div className="message-sources-list">
+        {sources.map((s) => (
+          <span className="source-chip" key={`${s.documentId}-${s.index}`} title={`Similarity ${(s.score * 100).toFixed(0)}%`}>
+            <span className="source-chip-name">{s.filename}</span>
+            {s.page ? <span className="source-chip-page">p. {s.page}</span> : null}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Chat() {
   const { newChat, prevChats, reply, setPrompt } = useContext(MyContext);
   const bottomRef = useRef(null);
@@ -121,6 +143,7 @@ function Chat() {
                   {chat.content}
                 </ReactMarkdown>
               </div>
+              {chat.sources?.length > 0 && <SourcesList sources={chat.sources} />}
               <div className="message-actions">
                 <CopyButton text={chat.content} />
               </div>

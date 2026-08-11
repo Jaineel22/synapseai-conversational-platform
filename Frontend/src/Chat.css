@@ -364,6 +364,55 @@ pre {
   animation: data-stream 3s linear infinite;
 }
 
+/* ---- RAG source citations ---- */
+.message-sources {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color);
+}
+
+.message-sources-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+  margin-bottom: 6px;
+}
+
+.message-sources-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.source-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  max-width: 220px;
+}
+
+.source-chip-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.source-chip-page {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
 /* ---- Message actions (copy, etc.) ---- */
 .message-content :first-child {
   margin-top: 0;
