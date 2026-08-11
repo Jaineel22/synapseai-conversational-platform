@@ -45,11 +45,13 @@ function renderChatWindow(contextOverrides = {}) {
     setReply: vi.fn(),
     currThreadId: 'test-thread',
     setPrevChats: vi.fn(),
+    newChat: true,
     setNewChat: vi.fn(),
     user: { name: 'Test User', email: 'test@example.com' },
     handleLogout: vi.fn(),
     isSidebarOpen: false,
     setIsSidebarOpen: vi.fn(),
+    fetchUserThreads: vi.fn(),
     ...contextOverrides,
   };
   render(
@@ -124,6 +126,33 @@ describe('ChatWindow — streaming chat consumption', () => {
         body: JSON.stringify({ message: 'Hello there', threadId: 'test-thread' }),
       }),
     );
+  });
+
+  it('refreshes the sidebar thread list after a brand-new conversation\'s first message completes', async () => {
+    window.fetch = vi.fn().mockResolvedValue(
+      sseResponse([{ event: 'chunk', data: { text: 'Hi!' } }, { event: 'done', data: {} }]),
+    );
+
+    const ctx = renderChatWindow({ newChat: true });
+    fireEvent.click(screen.getByRole('button', { name: /send message/i }));
+
+    await waitFor(() => {
+      expect(ctx.fetchUserThreads).toHaveBeenCalled();
+    });
+  });
+
+  it('does not re-fetch the thread list for a message sent into an already-existing thread', async () => {
+    window.fetch = vi.fn().mockResolvedValue(
+      sseResponse([{ event: 'chunk', data: { text: 'Hi!' } }, { event: 'done', data: {} }]),
+    );
+
+    const ctx = renderChatWindow({ newChat: false });
+    fireEvent.click(screen.getByRole('button', { name: /send message/i }));
+
+    await waitFor(() => {
+      expect(ctx.setPrevChats).toHaveBeenCalled();
+    });
+    expect(ctx.fetchUserThreads).not.toHaveBeenCalled();
   });
 
   it('on a pre-stream failure (e.g. validation error), restores the prompt and rolls back the optimistic message instead of keeping it', async () => {

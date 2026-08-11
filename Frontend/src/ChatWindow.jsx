@@ -46,10 +46,11 @@ function ChatWindow() {
     reply, setReply,
     currThreadId,
     setPrevChats,
-    setNewChat,
+    newChat, setNewChat,
     user,
     handleLogout,
     isSidebarOpen, setIsSidebarOpen,
+    fetchUserThreads,
   } = useContext(MyContext);
 
   const { theme, toggleTheme } = useContext(ThemeContext);
@@ -90,6 +91,9 @@ function ChatWindow() {
   const getReply = async () => {
     if (!prompt.trim() || loading) return;
     setLoading(true);
+    // Captured before clearing — determines whether this turn creates a
+    // brand-new server-side thread (see the sidebar refresh below).
+    const wasNewChat = newChat;
     setNewChat(false);
 
     // Capture prompt before clearing
@@ -170,6 +174,14 @@ function ChatWindow() {
       if (sources.length > 0) assistantMessage.sources = sources;
       setPrevChats(prev => [...prev, assistantMessage]);
       setReply(null);
+
+      // The backend creates the thread server-side on this turn's first
+      // message (see routes/chat.js) — without this, a brand-new
+      // conversation never appears in the sidebar until the user
+      // navigates away from it, since Sidebar only refetches when
+      // currThreadId itself changes, which it doesn't for the rest of
+      // this same conversation.
+      if (wasNewChat) fetchUserThreads();
     } catch (err) {
       if (err.name === "AbortError") {
         // User clicked Stop. Nothing was persisted server-side for the
