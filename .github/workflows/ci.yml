@@ -1,0 +1,48 @@
+name: CI
+
+# Two independent jobs, no shared state, no production secrets required:
+# backend tests run against an in-memory MongoDB with the Gemini SDK fully
+# mocked, and the frontend build doesn't need VITE_API_URL to succeed (it
+# falls back to a relative API path, same as local dev). This is meant to
+# be the confidence gate before deploying — push -> CI -> tests -> build —
+# not a deployment pipeline itself.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: Backend/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  frontend:
+    name: Frontend tests, lint, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: Frontend/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run lint
+      - run: npm run build

@@ -6,13 +6,17 @@
 .env.production.local
 
 # ─── Node Modules ─────────────────────────────────────────
+# Bare pattern (no path prefix) so it matches at any depth regardless of
+# the parent directory's case — Frontend/ and Backend/ are capitalized,
+# so a `frontend/`-prefixed pattern would silently never match on a
+# case-sensitive filesystem (Linux, i.e. every CI/deploy host).
 node_modules/
-frontend/node_modules/
-backend/node_modules/
 
 # ─── Build Outputs ────────────────────────────────────────
-frontend/dist/
-frontend/build/
+# Also package-local (Frontend/.gitignore has its own `dist` entry) —
+# kept here too, same case-sensitivity reasoning as above.
+Frontend/dist/
+Frontend/build/
 
 # ─── Logs ─────────────────────────────────────────────────
 *.log
