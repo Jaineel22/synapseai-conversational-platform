@@ -31,6 +31,12 @@ function DocumentsPanel({ onClose, onDocumentsChanged }) {
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [deletingIds, setDeletingIds] = useState(() => new Set());
+  // Mirrors deletingIds for a synchronous guard check — two fireEvent-speed
+  // clicks happen before React re-renders with the updated state, so
+  // reading `deletingIds` (state) inside handleDelete would still see the
+  // pre-click empty set for both calls. The ref is mutated immediately.
+  const deletingIdsRef = useRef(new Set());
   const fileInputRef = useRef(null);
   const { showToast } = useToast();
 
@@ -39,7 +45,8 @@ function DocumentsPanel({ onClose, onDocumentsChanged }) {
       const data = await listDocuments();
       setDocuments(data);
       onDocumentsChanged?.(data);
-    } catch {
+    } catch (err) {
+      console.error('Failed to fetch documents:', err);
       showToast("Couldn't load your documents. Please try again.", { type: "error" });
     } finally {
       setLoading(false);
@@ -69,6 +76,7 @@ function DocumentsPanel({ onClose, onDocumentsChanged }) {
       setDocuments((prev) => [doc, ...prev]);
       showToast(`"${doc.filename}" uploaded — processing started.`, { type: "success" });
     } catch (err) {
+      console.error('Failed to upload document:', err);
       const message = err.response?.data?.error || "Failed to upload document.";
       showToast(message, { type: "error" });
     } finally {
@@ -77,6 +85,13 @@ function DocumentsPanel({ onClose, onDocumentsChanged }) {
   };
 
   const handleDelete = async (doc) => {
+    // Guards against a double-click firing two DELETE requests — the
+    // second would 404 harmlessly server-side, but would also show a
+    // confusing "failed to delete" toast right after the "deleted" one.
+    if (deletingIdsRef.current.has(doc.id)) return;
+    deletingIdsRef.current.add(doc.id);
+    setDeletingIds(new Set(deletingIdsRef.current));
+
     try {
       await deleteDocument(doc.id);
       setDocuments((prev) => {
@@ -85,8 +100,11 @@ function DocumentsPanel({ onClose, onDocumentsChanged }) {
         return next;
       });
       showToast("Document deleted", { type: "success", duration: 2500 });
-    } catch {
+    } catch (err) {
+      console.error('Failed to delete document:', err);
       showToast("Failed to delete document. Please try again.", { type: "error" });
+      deletingIdsRef.current.delete(doc.id);
+      setDeletingIds(new Set(deletingIdsRef.current));
     }
   };
 
@@ -154,8 +172,9 @@ function DocumentsPanel({ onClose, onDocumentsChanged }) {
                 className="document-delete-btn"
                 aria-label={`Delete "${doc.filename}"`}
                 onClick={() => handleDelete(doc)}
+                disabled={deletingIds.has(doc.id)}
               >
-                <i className="fa-solid fa-trash" aria-hidden="true"></i>
+                <i className={`fa-solid ${deletingIds.has(doc.id) ? "fa-circle-notch fa-spin" : "fa-trash"}`} aria-hidden="true"></i>
               </button>
             </div>
           );

@@ -80,7 +80,7 @@ function ChatWindow() {
     if (!user) return;
     listDocuments()
       .then((docs) => setReadyDocCount(docs.filter((d) => d.status === 'ready').length))
-      .catch(() => {}); // non-critical — toggle just stays disabled
+      .catch((err) => console.error('Failed to fetch document count:', err)); // non-critical — toggle just stays disabled
   }, [user]);
 
   const handleDocumentsChanged = (docs) => {

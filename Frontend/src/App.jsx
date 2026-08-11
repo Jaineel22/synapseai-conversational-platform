@@ -15,6 +15,44 @@ import axios from 'axios';
 axios.defaults.baseURL = import.meta.env.VITE_API_URL || '';
 axios.defaults.withCredentials = true;
 
+// In a production build there is no dev proxy, so an empty VITE_API_URL
+// means every request silently targets a relative /api/... path on this
+// frontend's own origin — which has no backend behind it. This has
+// happened for real (VITE_API_URL left pointing at a decommissioned
+// backend after a migration) and surfaced only as a generic "couldn't
+// load" toast with nothing in the console to explain why. This warning
+// exists so that failure mode is visible immediately in devtools instead
+// of requiring a network-tab investigation.
+if (import.meta.env.PROD && !import.meta.env.VITE_API_URL) {
+    console.warn(
+        '[SynapseAI] VITE_API_URL is not set in this production build. ' +
+        'API requests will go to relative /api paths on this frontend\'s own origin, ' +
+        'which has no backend — set VITE_API_URL in your hosting platform\'s ' +
+        'environment variables to the deployed backend URL and redeploy.'
+    );
+}
+
+// Surfaces the specific failure when a request never got a response at
+// all (wrong/unreachable API host, CORS rejection, DNS failure, etc.) —
+// distinct from a normal HTTP error response, and otherwise invisible
+// beyond a generic "Network Error" with no indication of which URL was
+// actually being called.
+axios.interceptors.response.use(
+    (response) => response,
+    (error) => {
+        if (!error.response) {
+            const attemptedUrl = `${error.config?.baseURL || '(relative)'}${error.config?.url || ''}`;
+            console.error(
+                `[SynapseAI] Network request failed with no response — attempted URL: ${attemptedUrl}. ` +
+                'This usually means the backend is unreachable at that address, or the request was blocked by CORS. ' +
+                'Check VITE_API_URL and the backend\'s CLIENT_ORIGIN/CORS configuration.',
+                error.message
+            );
+        }
+        return Promise.reject(error);
+    }
+);
+
 function App() {
     // Chat state
     const [prompt, setPrompt] = useState("");
