@@ -19,6 +19,7 @@ An authenticated AI conversational platform with Retrieval-Augmented Generation,
 - [Authentication](#authentication)
 - [AI architecture](#ai-architecture)
 - [RAG: document knowledge base](#rag-document-knowledge-base)
+- [Reliability, security & observability](#reliability-security--observability)
 - [Database](#database)
 - [API reference](#api-reference)
 - [Project structure](#project-structure)
@@ -109,6 +110,17 @@ JWT, signed server-side and stored in an `httpOnly` cookie — never exposed to 
 - **Streaming**: `generateContentStream` yields incremental text deltas, forwarded to the client as SSE `chunk` events as they arrive; the complete reply is persisted to MongoDB exactly once, only after generation finishes successfully — individual chunks are never written to the database.
 - **Timeouts & cancellation**: a hard timeout (`GEMINI_TIMEOUT_MS`, default 60s) bounds every call. A client disconnect or explicit Stop click aborts the stream and skips persisting an incomplete reply.
 - **Error handling**: Gemini's `ApiError` status code drives user-facing error messages (rate-limited, invalid key, model unavailable, etc.) rather than fragile string matching.
+- **Function calling**: one small, deliberately minimal tool (`get_current_datetime`, see `Backend/services/tools.js`) is offered to Gemini on every chat turn. When Gemini decides to call it (e.g. "what's today's date"), the call is executed server-side — a fixed, hand-written function with validated arguments, no arbitrary code execution — and the result is sent back in exactly one follow-up request to produce the final streamed answer, bounding the chain to a single tool hop. This is deliberately scoped small: it exists to demonstrate real tool use (not just text generation), not to become a general agent framework. Adding another tool means adding one declaration + one executor in `tools.js` — nothing else in the request pipeline needs to change.
+
+## Reliability, security & observability
+
+- **Error responses**: every route follows the same `{ error: "..." }` JSON shape. Client (4xx) messages are safe to show as-is; unexpected server (5xx) errors are logged in full server-side but only ever return a generic "Internal server error" to the client — no stack traces, driver messages, or internals leak into a response.
+- **Document processing failure handling**: if any stage (extraction, chunking, embedding, or the final DB write) fails, the document is marked `failed` with a user-safe error message, and any chunks already written by a partially-succeeded step are explicitly deleted — a document never ends up in a state where it looks `failed` but still has retrievable chunks, or where a transient DB error between "chunks saved" and "status updated" leaves stale data behind.
+- **Gemini/embedding failures**: 429 (rate limit), 401/403 (bad key), and 5xx (upstream outage) are each mapped to a specific, honest user-facing message rather than a generic failure — both for chat generation (`utils/gemini.js`) and embeddings (`services/embeddingService.js`), which are rate-limited independently of each other.
+- **Logging**: lightweight and structured-by-convention rather than a logging framework — every log line is prefixed by category (`[chat]`, `[documents]`, `[auth]`, `[rate-limit]`, `[error]`) and includes just enough identifiers (route, status, thread/document id, error category) to diagnose an issue, never request bodies, tokens, API keys, or document contents.
+- **Rate limiting**: auth (per-IP), chat (per-account), and document upload (per-account) each have independent limits, sized to the actual resource being protected (a paid Gemini quota, in chat's case) rather than one blanket number.
+- **CORS**: a single, explicit origin (`CLIENT_ORIGIN`) with credentials enabled — never a wildcard, which the `cors` package itself refuses to combine with credentials.
+- **Ownership isolation**: every thread/document/chunk query is scoped to the authenticated `userId` at the database-query level (never as an app-layer filter applied after fetching), covered by dedicated cross-user isolation tests on both the RAG retrieval layer and the documents/chat APIs.
 
 ## RAG: document knowledge base
 
@@ -206,10 +218,14 @@ SynapseAI/
 │   │   ├── embeddingService.js  # Gemini embedContent wrapper (documents + queries)
 │   │   ├── documentProcessing.js # Orchestrates extract -> chunk -> embed -> persist
 │   │   ├── retrieval.js         # Ownership-scoped cosine-similarity search
-│   │   └── ragPrompt.js         # Grounding system instruction + context-block prompt building
+│   │   ├── ragPrompt.js         # Grounding system instruction + context-block prompt building
+│   │   └── tools.js             # Function-calling tool declarations + deterministic executors
 │   ├── utils/
-│   │   └── gemini.js            # Gemini streaming, context building, system instruction
+│   │   └── gemini.js            # Gemini streaming, context building, system instruction, tool-call loop
 │   └── tests/                   # Vitest + Supertest integration tests
+│
+├── .github/workflows/ci.yml     # Backend tests + frontend tests/lint/build on every push/PR
+├── docs/ARCHITECTURE.md         # Deeper flow-by-flow architecture reference
 │
 └── Frontend/
     └── src/
@@ -294,9 +310,21 @@ Backend tests cover: registration/login validation and failure modes, session li
 
 No test in either package makes a real Gemini API call — every AI call (chat generation and embeddings) is mocked with deterministic fixtures, so the suite runs the same whether or not the Gemini API key currently has quota available.
 
+**CI**: `.github/workflows/ci.yml` runs on every push/PR to `main` — backend tests, and frontend tests + lint + build, as two independent jobs. Neither needs any repository secrets (backend tests use an in-memory MongoDB and a fully mocked Gemini SDK; the frontend build doesn't require `VITE_API_URL` to succeed), so it's a pure code-correctness gate, not a deployment step.
+
+See also [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for a flow-by-flow walkthrough (auth, thread, document ingestion, embedding, retrieval, RAG generation) and the major security boundaries.
+
 ## Deployment
 
-- **Frontend**: Vercel. `VITE_API_URL` (a build-time variable) must point at the Render backend's URL.
+- **Frontend**: Vercel. `VITE_API_URL` (a build-time variable) must point at the Render backend's URL. Root Directory must be set to `Frontend` in the Vercel project settings (this is a two-package repo with no root `package.json`).
 - **Backend**: Render, as a persistent Node web service — build command `npm install`, start command `npm start`, health check path `/health`. `NODE_ENV=production` must be set explicitly (Render doesn't guarantee this the way some platforms do, and the app's cookie security depends on it). A `vercel.json` is still present in `Backend/` as a dormant rollback path from before the Render migration; it isn't used in the current deployment.
 - **Database**: MongoDB Atlas. No manual index/dashboard configuration is required for RAG — retrieval runs in-app (see [RAG: document knowledge base](#rag-document-knowledge-base)) against the same collections/connection every other feature already uses.
 - **Document uploads**: processed entirely in memory; nothing is written to Render's (ephemeral) filesystem, so this requires no persistent disk or object storage add-on.
+
+### Troubleshooting: "chat/login works but documents don't load"
+
+This exact symptom has a specific known cause: `VITE_API_URL` in the Vercel project's environment variables still points at a **previous** backend deployment (e.g. an old Vercel-serverless backend from before a migration to Render), rather than the current one. Because that old deployment may still be alive and still serve auth/chat (routes that existed before a newer feature like RAG was added), login and chat can appear to work completely normally while any newer endpoint 404s/401s — there is no visible error pointing at the real cause.
+
+To confirm: open the deployed site, open browser devtools → Network tab, trigger the failing action, and check which **host** the failed request actually went to. (As of this fix, a network-level failure — wrong host, unreachable backend, CORS rejection — is also now logged to the console with the exact attempted URL; see `src/App.jsx`'s axios response interceptor.)
+
+To fix: update `VITE_API_URL` in the Vercel project's environment variables to the current backend's exact origin, then trigger a new deployment (env var changes don't apply to already-built deployments — Vite bakes `VITE_API_URL` in at build time).
