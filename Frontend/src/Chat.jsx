@@ -1,12 +1,66 @@
 import "./Chat.css";
-import { useContext, useEffect, useRef } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { MyContext } from "./MyContext";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import "highlight.js/styles/github-dark.css";
 
+const SUGGESTIONS = [
+  {
+    icon: "fa-lightbulb",
+    title: "Explain a concept",
+    desc: "Break down something complex into plain language",
+    prompt: "Explain how ",
+  },
+  {
+    icon: "fa-bug",
+    title: "Debug my code",
+    desc: "Find and fix an error in a snippet",
+    prompt: "Help me debug this error:\n\n",
+  },
+  {
+    icon: "fa-align-left",
+    title: "Summarize something",
+    desc: "Turn a long passage into key points",
+    prompt: "Summarize the following in 3 bullet points:\n\n",
+  },
+  {
+    icon: "fa-wand-magic-sparkles",
+    title: "Brainstorm ideas",
+    desc: "Generate options to get unstuck",
+    prompt: "Brainstorm 5 ideas for ",
+  },
+];
+
+function CopyButton({ text }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard API can fail (permissions, insecure context, etc.) — the
+      // button simply won't flip to "Copied", no need for a toast over
+      // something this low-stakes.
+    }
+  };
+
+  return (
+    <button
+      className={`message-action ${copied ? 'message-action-done' : ''}`}
+      onClick={handleCopy}
+      aria-label={copied ? "Copied" : "Copy message"}
+      title={copied ? "Copied" : "Copy message"}
+    >
+      <i className={`fa-solid ${copied ? 'fa-check' : 'fa-copy'}`} aria-hidden="true"></i>
+    </button>
+  );
+}
+
 function Chat() {
-  const { newChat, prevChats, reply } = useContext(MyContext);
+  const { newChat, prevChats, reply, setPrompt } = useContext(MyContext);
   const bottomRef = useRef(null);
 
   // Keep the latest message (including a message still streaming in)
@@ -18,13 +72,33 @@ function Chat() {
   // Welcome / empty state
   if (newChat && (!prevChats || prevChats.length === 0)) {
     return (
-      <div className="chats" style={{ justifyContent: 'center', alignItems: 'center', display: 'flex' }}>
+      <div className="chats welcome-chats">
         <div className="welcome-state">
-          <div className="welcome-icon">
-            <i className="fa-solid fa-brain" style={{ color: 'white' }}></i>
+          <div className="welcome-orb" aria-hidden="true">
+            <div className="welcome-orb-ring"></div>
+            <div className="welcome-orb-core">
+              <i className="fa-solid fa-brain"></i>
+            </div>
+            <div className="welcome-node welcome-node-1"></div>
+            <div className="welcome-node welcome-node-2"></div>
+            <div className="welcome-node welcome-node-3"></div>
           </div>
-          <div className="welcome-title">SynapseAI</div>
-          <div className="welcome-sub">// neural pathways ready</div>
+          <h2 className="welcome-title">How can I help?</h2>
+          <p className="welcome-sub">Ask a question, paste in some code, or pick up where a past conversation left off.</p>
+
+          <div className="suggested-prompts">
+            {SUGGESTIONS.map((s) => (
+              <button
+                key={s.title}
+                className="suggestion-card"
+                onClick={() => setPrompt(s.prompt)}
+              >
+                <i className={`fa-solid ${s.icon}`} aria-hidden="true"></i>
+                <span className="suggestion-title">{s.title}</span>
+                <span className="suggestion-desc">{s.desc}</span>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     );
@@ -41,10 +115,15 @@ function Chat() {
           {chat.role === "user" ? (
             <p className="userMessage">{chat.content}</p>
           ) : (
-            <div>
-              <ReactMarkdown rehypePlugins={[rehypeHighlight]}>
-                {chat.content}
-              </ReactMarkdown>
+            <div className="message-block">
+              <div className="message-content">
+                <ReactMarkdown rehypePlugins={[rehypeHighlight]}>
+                  {chat.content}
+                </ReactMarkdown>
+              </div>
+              <div className="message-actions">
+                <CopyButton text={chat.content} />
+              </div>
             </div>
           )}
         </div>

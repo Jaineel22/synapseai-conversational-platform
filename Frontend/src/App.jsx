@@ -1,9 +1,10 @@
 import './App.css';
 import Sidebar from "./Sidebar.jsx";
 import ChatWindow from "./ChatWindow.jsx";
-import AuthModal from "./AuthModal.jsx";
+import AuthScreen from "./AuthScreen.jsx";
 import { MyContext } from "./MyContext.jsx";
 import { ThemeContext } from "./ThemeContext.jsx";
+import { useToast } from "./useToast.js";
 import { useState, useEffect, useCallback } from 'react';
 import { v1 as uuidv1 } from "uuid";
 import axios from 'axios';
@@ -25,12 +26,19 @@ function App() {
 
     // Auth state
     const [user, setUser] = useState(null);
-    const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
     const [authMode, setAuthMode] = useState('login');
+    const [authPending, setAuthPending] = useState(false);
     const [loading, setLoading] = useState(true);
 
     // Theme state
     const [theme, setTheme] = useState('dark');
+
+    // Sidebar visibility — only meaningful below the mobile/tablet
+    // breakpoint, where the sidebar becomes an off-canvas drawer instead
+    // of a permanently-visible column.
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+    const { showToast } = useToast();
 
     const fetchUserThreads = useCallback(async () => {
         try {
@@ -85,16 +93,19 @@ function App() {
     }, [theme, user, updateUserTheme]);
 
     const handleAuth = async (userData) => {
+        setAuthPending(true);
         try {
             const endpoint = authMode === 'login' ? '/api/auth/login' : '/api/auth/register';
             const response = await axios.post(endpoint, userData);
             setUser(response.data.user);
             setTheme(response.data.user.theme || 'dark');
-            setIsAuthModalOpen(false);
             fetchUserThreads();
         } catch (error) {
-            console.error('Auth error:', error);
-            alert(error.response?.data?.error || 'Authentication failed');
+            const message = error.response?.data?.error || 'Authentication failed';
+            showToast(message, { type: 'error' });
+            throw new Error(message); // lets AuthScreen clear its own pending state
+        } finally {
+            setAuthPending(false);
         }
     };
 
@@ -127,16 +138,22 @@ function App() {
         prevChats, setPrevChats,
         allThreads, setAllThreads,
         user, setUser,
-        isAuthModalOpen, setIsAuthModalOpen,
         authMode, setAuthMode,
         handleAuth,
         handleLogout,
         theme, toggleTheme,
-        fetchUserThreads
+        fetchUserThreads,
+        isSidebarOpen, setIsSidebarOpen,
     };
 
     if (loading) {
-        return <div className="loading-screen">Loading...</div>;
+        return (
+            <div className="loading-screen" role="status" aria-live="polite">
+                <div className="loading-mark" aria-hidden="true">
+                    <i className="fa-solid fa-brain"></i>
+                </div>
+            </div>
+        );
     }
 
     return (
@@ -149,25 +166,7 @@ function App() {
                             <ChatWindow />
                         </>
                     ) : (
-                        <div className="landing-page">
-                            <h1>Welcome to SynapseAI</h1>
-                            <p>Please login or register to continue</p>
-                            <div className="auth-buttons">
-                                <button onClick={() => { setAuthMode('login'); setIsAuthModalOpen(true); }}>
-                                    Login
-                                </button>
-                                <button onClick={() => { setAuthMode('register'); setIsAuthModalOpen(true); }}>
-                                    Register
-                                </button>
-                            </div>
-                        </div>
-                    )}
-                    {isAuthModalOpen && (
-                        <AuthModal
-                            mode={authMode}
-                            onClose={() => setIsAuthModalOpen(false)}
-                            onSubmit={handleAuth}
-                        />
+                        <AuthScreen mode={authMode} onModeChange={setAuthMode} onSubmit={handleAuth} pending={authPending} />
                     )}
                 </div>
             </MyContext.Provider>

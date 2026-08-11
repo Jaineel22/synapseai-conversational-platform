@@ -1,7 +1,9 @@
 import "./ChatWindow.css";
 import Chat from "./Chat.jsx";
+import Modal from "./Modal.jsx";
 import { MyContext } from "./MyContext.jsx";
 import { ThemeContext } from "./ThemeContext.jsx";
+import { useToast } from "./useToast.js";
 import { useContext, useState, useEffect, useRef } from "react";
 
 // Same base URL logic as axios.defaults.baseURL in App.jsx — kept separate
@@ -34,6 +36,8 @@ function NeuralLoader() {
   );
 }
 
+const MAX_TEXTAREA_HEIGHT = 200; // px — beyond this the composer scrolls instead of growing further
+
 function ChatWindow() {
   const {
     prompt, setPrompt,
@@ -42,16 +46,26 @@ function ChatWindow() {
     setPrevChats,
     setNewChat,
     user,
-    handleLogout
+    handleLogout,
+    isSidebarOpen, setIsSidebarOpen,
   } = useContext(MyContext);
 
   const { theme, toggleTheme } = useContext(ThemeContext);
+  const { showToast } = useToast();
   const [loading, setLoading] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showUpgrade, setShowUpgrade] = useState(false);
   const inputRef = useRef(null);
   const abortControllerRef = useRef(null);
+
+  // Auto-resize the composer as the user types, up to a capped height.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT)}px`;
+  }, [prompt]);
 
   const getReply = async () => {
     if (!prompt.trim() || loading) return;
@@ -136,13 +150,13 @@ function ChatWindow() {
         if (streamStarted) {
           // The user's message was already saved — keep it visible and
           // just surface that the reply failed.
-          alert(err.message || "Failed to get response");
+          showToast(err.message || "Failed to get response", { type: "error" });
         } else {
           // Nothing was saved — restore the prompt and remove the
           // optimistic bubble so the UI matches server state.
           setPrompt(currentPrompt);
           setPrevChats(prev => prev.slice(0, -1));
-          alert(err.message || "Failed to get response");
+          showToast(err.message || "Failed to get response", { type: "error" });
         }
       }
     } finally {
@@ -168,12 +182,17 @@ function ChatWindow() {
   const handleThemeToggle = () => { toggleTheme(); setIsOpen(false); };
   const handleLogoutClick = () => { setIsOpen(false); handleLogout(); };
 
-  // Close dropdown on outside click
+  // Close dropdown on outside click or Escape
   useEffect(() => {
     if (!isOpen) return;
-    const handler = () => setIsOpen(false);
-    document.addEventListener('click', handler);
-    return () => document.removeEventListener('click', handler);
+    const handleClick = () => setIsOpen(false);
+    const handleKey = (e) => { if (e.key === 'Escape') setIsOpen(false); };
+    document.addEventListener('click', handleClick);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('click', handleClick);
+      document.removeEventListener('keydown', handleKey);
+    };
   }, [isOpen]);
 
   const hasPrompt = prompt.trim().length > 0;
@@ -182,35 +201,47 @@ function ChatWindow() {
     <div className="chatWindow">
       {/* Navbar */}
       <div className="navbar">
-        <div className="navbar-brand">
-          <div className="navbar-brand-icon">
-            <i className="fa-solid fa-brain" style={{ color: 'white', fontSize: '16px' }}></i>
+        <div className="navbar-left">
+          <button
+            className="sidebar-toggle"
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+            aria-label={isSidebarOpen ? "Close sidebar" : "Open sidebar"}
+            aria-expanded={isSidebarOpen}
+          >
+            <i className="fa-solid fa-bars" aria-hidden="true"></i>
+          </button>
+          <div className="navbar-brand">
+            <div className="navbar-brand-icon" aria-hidden="true">
+              <i className="fa-solid fa-brain" style={{ color: 'white', fontSize: '16px' }}></i>
+            </div>
+            <span className="navbar-brand-name">SYNAPSE AI</span>
+            <span className="navbar-model-tag">v2.0</span>
           </div>
-          <span className="navbar-brand-name">SYNAPSE AI</span>
-          <span className="navbar-model-tag">v2.0</span>
         </div>
 
         <div className="nav-right">
-          <button className="theme-toggle" onClick={handleThemeToggle} title="Toggle theme">
-            <i className={`fa-solid ${theme === 'dark' ? 'fa-sun' : 'fa-moon'}`}></i>
+          <button className="theme-toggle" onClick={handleThemeToggle} aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} title="Toggle theme">
+            <i className={`fa-solid ${theme === 'dark' ? 'fa-sun' : 'fa-moon'}`} aria-hidden="true"></i>
           </button>
-          <div
+          <button
             className="userIconDiv"
             onClick={(e) => { e.stopPropagation(); handleProfileClick(); }}
-            title={user?.name}
+            aria-label={`Account menu for ${user?.name || 'your account'}`}
+            aria-haspopup="menu"
+            aria-expanded={isOpen}
           >
-            <div className="userIcon">
+            <div className="userIcon" aria-hidden="true">
               {user?.name?.charAt(0).toUpperCase() || <i className="fa-solid fa-user"></i>}
             </div>
-          </div>
+          </button>
         </div>
       </div>
 
       {/* Profile Dropdown */}
       {isOpen && (
-        <div className="dropDown" onClick={e => e.stopPropagation()}>
+        <div className="dropDown" role="menu" onClick={e => e.stopPropagation()}>
           <div className="dropdown-user-header">
-            <div className="dropdown-avatar">
+            <div className="dropdown-avatar" aria-hidden="true">
               {user?.name?.charAt(0).toUpperCase()}
             </div>
             <div>
@@ -219,16 +250,16 @@ function ChatWindow() {
             </div>
           </div>
           <div className="dropdown-divider"></div>
-          <div className="dropDownItem" onClick={handleSettings}>
-            <i className="fa-solid fa-gear"></i> Settings
-          </div>
-          <div className="dropDownItem" onClick={handleUpgrade}>
-            <i className="fa-solid fa-bolt"></i> Upgrade
-          </div>
+          <button className="dropDownItem" role="menuitem" onClick={handleSettings}>
+            <i className="fa-solid fa-gear" aria-hidden="true"></i> Settings
+          </button>
+          <button className="dropDownItem" role="menuitem" onClick={handleUpgrade}>
+            <i className="fa-solid fa-bolt" aria-hidden="true"></i> Upgrade
+          </button>
           <div className="dropdown-divider"></div>
-          <div className="dropDownItem logout-item" onClick={handleLogoutClick}>
-            <i className="fa-solid fa-arrow-right-from-bracket"></i> Log out
-          </div>
+          <button className="dropDownItem logout-item" role="menuitem" onClick={handleLogoutClick}>
+            <i className="fa-solid fa-arrow-right-from-bracket" aria-hidden="true"></i> Log out
+          </button>
         </div>
       )}
 
@@ -248,13 +279,15 @@ function ChatWindow() {
       {/* Input */}
       <div className="chatInput">
         <div className={`inputBox ${hasPrompt ? 'has-content' : ''} ${loading ? 'is-loading' : ''}`}>
-          <input
+          <textarea
             ref={inputRef}
             placeholder="Send a neural signal..."
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={handleKeyDown}
             disabled={loading}
+            rows={1}
+            aria-label="Message"
           />
           {/* Send/Stop button — becomes a Stop control while a reply is streaming */}
           <button
@@ -266,9 +299,9 @@ function ChatWindow() {
             aria-label={loading ? "Stop generating" : "Send message"}
           >
             {loading ? (
-              <i className="fa-solid fa-stop"></i>
+              <i className="fa-solid fa-stop" aria-hidden="true"></i>
             ) : (
-              <i className="fa-solid fa-paper-plane"></i>
+              <i className="fa-solid fa-paper-plane" aria-hidden="true"></i>
             )}
           </button>
         </div>
@@ -287,64 +320,60 @@ function SettingsModal({ onClose }) {
   const { user } = useContext(MyContext);
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
-        <h3><i className="fa-solid fa-gear" style={{ marginRight: '8px' }}></i>Settings</h3>
-        <div className="settings-item">
-          <span>Appearance</span>
-          <button onClick={toggleTheme} className="settings-btn">
-            <i className={`fa-solid ${theme === 'dark' ? 'fa-sun' : 'fa-moon'}`} style={{ marginRight: '6px' }}></i>
-            {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
-          </button>
-        </div>
-        <div className="settings-item">
-          <span>Account</span>
-          <span className="settings-value">{user?.email}</span>
-        </div>
-        <div className="settings-item">
-          <span>Neural Engine</span>
-          <span className="settings-badge">v2.0 active</span>
-        </div>
-        <button className="close-modal" onClick={onClose}>Done</button>
+    <Modal onClose={onClose} labelledBy="settings-modal-title">
+      <h3 id="settings-modal-title"><i className="fa-solid fa-gear" aria-hidden="true" style={{ marginRight: '8px' }}></i>Settings</h3>
+      <div className="settings-item">
+        <span>Appearance</span>
+        <button onClick={toggleTheme} className="settings-btn">
+          <i className={`fa-solid ${theme === 'dark' ? 'fa-sun' : 'fa-moon'}`} aria-hidden="true" style={{ marginRight: '6px' }}></i>
+          {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+        </button>
       </div>
-    </div>
+      <div className="settings-item">
+        <span>Account</span>
+        <span className="settings-value">{user?.email}</span>
+      </div>
+      <div className="settings-item">
+        <span>Neural Engine</span>
+        <span className="settings-badge">v2.0 active</span>
+      </div>
+      <button className="close-modal" onClick={onClose}>Done</button>
+    </Modal>
   );
 }
 
 // ─── Upgrade Modal ─────────────────────────────────────────────────────────────
 function UpgradeModal({ onClose }) {
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
-        <h3><i className="fa-solid fa-bolt" style={{ marginRight: '8px' }}></i>Upgrade Neural Link</h3>
-        <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '1.2rem' }}>
-          Unlock full synaptic potential:
-        </p>
-        <div className="plan-card">
-          <div className="plan-header">
-            <h4>Free</h4>
-            <span className="plan-price">$0<span>/mo</span></span>
-          </div>
-          <ul>
-            <li><i className="fa-solid fa-check"></i> Basic neural processing</li>
-            <li><i className="fa-solid fa-check"></i> Limited requests/day</li>
-          </ul>
+    <Modal onClose={onClose} labelledBy="upgrade-modal-title">
+      <h3 id="upgrade-modal-title"><i className="fa-solid fa-bolt" aria-hidden="true" style={{ marginRight: '8px' }}></i>Upgrade Neural Link</h3>
+      <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '1.2rem' }}>
+        Unlock full synaptic potential:
+      </p>
+      <div className="plan-card">
+        <div className="plan-header">
+          <h4>Free</h4>
+          <span className="plan-price">$0<span>/mo</span></span>
         </div>
-        <div className="plan-card plan-pro">
-          <div className="plan-header">
-            <h4>Pro <span className="plan-badge">Popular</span></h4>
-            <span className="plan-price">$10<span>/mo</span></span>
-          </div>
-          <ul>
-            <li><i className="fa-solid fa-check"></i> Full neural bandwidth</li>
-            <li><i className="fa-solid fa-check"></i> Unlimited requests</li>
-            <li><i className="fa-solid fa-check"></i> Priority synapse routing</li>
-          </ul>
-          <button className="upgrade-cta">Upgrade to Pro</button>
-        </div>
-        <button className="close-modal" onClick={onClose}>Maybe later</button>
+        <ul>
+          <li><i className="fa-solid fa-check" aria-hidden="true"></i> Basic neural processing</li>
+          <li><i className="fa-solid fa-check" aria-hidden="true"></i> Limited requests/day</li>
+        </ul>
       </div>
-    </div>
+      <div className="plan-card plan-pro">
+        <div className="plan-header">
+          <h4>Pro <span className="plan-badge">Popular</span></h4>
+          <span className="plan-price">$10<span>/mo</span></span>
+        </div>
+        <ul>
+          <li><i className="fa-solid fa-check" aria-hidden="true"></i> Full neural bandwidth</li>
+          <li><i className="fa-solid fa-check" aria-hidden="true"></i> Unlimited requests</li>
+          <li><i className="fa-solid fa-check" aria-hidden="true"></i> Priority synapse routing</li>
+        </ul>
+        <button className="upgrade-cta">Upgrade to Pro</button>
+      </div>
+      <button className="close-modal" onClick={onClose}>Maybe later</button>
+    </Modal>
   );
 }
 
