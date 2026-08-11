@@ -4,6 +4,7 @@ import { MyContext } from "./MyContext.jsx";
 import { useToast } from "./useToast.js";
 import { v1 as uuidv1 } from "uuid";
 import axios from 'axios';
+import logo from "./assets/SynapseAI logo.png";
 
 function Sidebar() {
   const {
@@ -110,7 +111,7 @@ function Sidebar() {
           {/* New Chat Button */}
           <button className="new-chat-btn" onClick={createNewChat}>
             <div className="logo-wrapper">
-              <img src="src/assets/SynapseAI logo.png" alt="" className="logo" />
+              <img src={logo} alt="" className="logo" />
               <span className="logo-text">SYNAPSE</span>
             </div>
             <i className="fa-solid fa-pen-to-square new-chat-icon" aria-hidden="true" title="New chat"></i>
