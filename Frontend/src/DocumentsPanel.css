@@ -159,6 +159,11 @@
   transition: color var(--duration-fast) ease, background var(--duration-fast) ease;
 }
 
+.document-delete-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .document-delete-btn:hover {
   color: var(--danger);
   background: var(--danger-soft);

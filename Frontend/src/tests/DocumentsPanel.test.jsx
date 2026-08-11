@@ -19,6 +19,13 @@ function renderPanel(props = {}) {
 describe('DocumentsPanel', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    // vi.restoreAllMocks() does not clear call history for these
+    // auto-mocked module functions (vi.mock('../api/documents.js') with
+    // no factory) — without this, a later test asserting an exact call
+    // count would see calls left over from earlier tests in this file.
+    documentsApi.listDocuments.mockClear();
+    documentsApi.uploadDocument.mockClear();
+    documentsApi.deleteDocument.mockClear();
     mockShowToast.mockClear();
   });
 
@@ -106,5 +113,23 @@ describe('DocumentsPanel', () => {
     await waitFor(() => {
       expect(screen.queryByText('handbook.pdf')).not.toBeInTheDocument();
     });
+  });
+
+  it('ignores a rapid double-click on delete instead of firing two requests', async () => {
+    documentsApi.listDocuments.mockResolvedValue([
+      { id: '1', filename: 'handbook.pdf', fileType: 'pdf', fileSize: 2048, status: 'ready', chunkCount: 3, error: null },
+    ]);
+    let resolveDelete;
+    documentsApi.deleteDocument.mockReturnValue(new Promise((resolve) => { resolveDelete = resolve; }));
+    renderPanel();
+
+    await screen.findByText('handbook.pdf');
+    const deleteBtn = screen.getByRole('button', { name: /delete "handbook.pdf"/i });
+    fireEvent.click(deleteBtn);
+    fireEvent.click(deleteBtn); // second click while the first delete is still in flight
+
+    expect(documentsApi.deleteDocument).toHaveBeenCalledTimes(1);
+    resolveDelete();
+    await waitFor(() => expect(screen.queryByText('handbook.pdf')).not.toBeInTheDocument());
   });
 });
