@@ -7,6 +7,7 @@ import mongoose from 'mongoose';
 
 import chatRoutes from './routes/chat.js';
 import authRoutes from './routes/auth.js';
+import documentRoutes from './routes/documents.js';
 
 // ─── Required Environment Variables ───────────────────────
 // Fail loudly at startup rather than running in a broken state where every
@@ -93,6 +94,7 @@ app.use(async (req, res, next) => {
 
 // ─── Routes ───────────────────────────────────────────────
 app.use('/api/auth', authRoutes);
+app.use('/api/documents', documentRoutes);
 app.use('/api', chatRoutes);
 
 // ─── 404 Handler ──────────────────────────────────────────

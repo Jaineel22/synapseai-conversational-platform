@@ -33,3 +33,16 @@ export const chatLimiter = rateLimit({
     keyGenerator: (req) => req.userId || ipKeyGenerator(req.ip),
     handler: jsonRateLimitHandler,
 });
+
+// Document upload runs after authMiddleware too. Uploads are more expensive
+// than a chat message (text extraction + a batch of embedding calls per
+// file), so the window is generous but the per-window count is modest —
+// enough for normal use, not enough to be useful for quota-draining abuse.
+export const documentUploadLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: Number(process.env.DOCUMENT_UPLOAD_RATE_LIMIT) || 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => req.userId || ipKeyGenerator(req.ip),
+    handler: jsonRateLimitHandler,
+});

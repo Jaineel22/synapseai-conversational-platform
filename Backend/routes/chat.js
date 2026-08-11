@@ -2,6 +2,8 @@ import express from "express";
 import { z } from "zod";
 import Thread from "../models/Thread.js";
 import { streamGeminiResponse, buildGeminiContents, MAX_CONTEXT_MESSAGES } from "../utils/gemini.js";
+import { retrieveRelevantChunks } from "../services/retrieval.js";
+import { buildRagContents, buildSourcesPayload, RAG_SYSTEM_INSTRUCTION } from "../services/ragPrompt.js";
 import authMiddleware from "../middleware/auth.js";
 import validateBody from "../middleware/validate.js";
 import { chatLimiter } from "../middleware/rateLimiter.js";
@@ -14,6 +16,12 @@ router.use(authMiddleware);
 const chatSchema = z.object({
   threadId: z.string().trim().min(1, "threadId is required").max(200, "threadId is too long"),
   message: z.string().trim().min(1, "Message cannot be empty").max(8000, "Message is too long (max 8000 characters)"),
+  // "Ask my documents" mode — when true, the turn is grounded in the
+  // user's uploaded documents instead of (or in addition to) general
+  // knowledge. documentIds narrows retrieval to specific documents;
+  // omitted/empty means "search everything the user owns".
+  useKnowledge: z.boolean().optional().default(false),
+  documentIds: z.array(z.string().trim().min(1)).max(20).optional(),
 });
 
 // ─────────────────────────────────────────
@@ -86,7 +94,7 @@ router.delete("/thread/:threadId", async (req, res) => {
 //     `done` or `error`.
 // ─────────────────────────────────────────
 router.post("/chat", chatLimiter, validateBody(chatSchema), async (req, res) => {
-  const { threadId, message } = req.body;
+  const { threadId, message, useKnowledge, documentIds } = req.body;
 
   // Persist the user's message first, before touching Gemini at all, so it
   // survives even if generation fails outright (same guarantee as before).
@@ -114,6 +122,34 @@ router.post("/chat", chatLimiter, validateBody(chatSchema), async (req, res) => 
   } catch (err) {
     console.error("Chat: failed to save user message", err);
     return res.status(500).json({ error: "Failed to save message" });
+  }
+
+  // The just-saved user message is already the last entry in
+  // thread.messages, so slicing the window here naturally includes it
+  // without any risk of sending it twice.
+  const contextWindow = thread.messages.slice(-MAX_CONTEXT_MESSAGES);
+
+  // Retrieval happens BEFORE the SSE stream opens, on purpose: a retrieval
+  // failure (embedding quota, DB error) can still be reported as a normal
+  // JSON error response, same as any other pre-generation failure, instead
+  // of having to invent an SSE-only failure mode for it.
+  let contents;
+  let sources = [];
+  let systemInstruction;
+
+  if (useKnowledge) {
+    try {
+      const retrieved = await retrieveRelevantChunks({ userId: req.userId, query: message, documentIds });
+      contents = buildRagContents(contextWindow, retrieved);
+      sources = buildSourcesPayload(retrieved);
+      systemInstruction = RAG_SYSTEM_INSTRUCTION;
+      console.log(`[chat] retrieval performed thread=${threadId} user=${req.userId} chunks=${retrieved.length}`);
+    } catch (err) {
+      console.error(`[chat] retrieval failed thread=${threadId}`, err.message);
+      return res.status(502).json({ error: err.message || "Failed to search your documents. Please try again." });
+    }
+  } else {
+    contents = buildGeminiContents(contextWindow);
   }
 
   // ─── Begin SSE stream ─────────────────────────────────────
@@ -148,15 +184,9 @@ router.post("/chat", chatLimiter, validateBody(chatSchema), async (req, res) => 
   let fullText = "";
 
   try {
-    // The just-saved user message is already the last entry in
-    // thread.messages, so slicing the window here naturally includes it
-    // without any risk of sending it twice.
-    const contextWindow = thread.messages.slice(-MAX_CONTEXT_MESSAGES);
-    const contents = buildGeminiContents(contextWindow);
+    console.log(`[chat] generation started thread=${threadId} user=${req.userId} knowledge=${useKnowledge}`);
 
-    console.log(`[chat] generation started thread=${threadId} user=${req.userId}`);
-
-    for await (const delta of streamGeminiResponse(contents, { abortSignal: abortController.signal })) {
+    for await (const delta of streamGeminiResponse(contents, { abortSignal: abortController.signal, systemInstruction })) {
       // The Gemini SDK's abortSignal is documented as "client-only" — it
       // does not reliably stop the async generator from yielding further
       // chunks that may already be in flight. Checking clientClosed here
@@ -179,13 +209,15 @@ router.post("/chat", chatLimiter, validateBody(chatSchema), async (req, res) => 
 
     // Persist the complete assistant reply once generation finishes
     // successfully — never write individual streamed chunks to MongoDB.
-    thread.messages.push({ role: "assistant", content: fullText });
+    // Citations are persisted alongside the reply so they survive a page
+    // reload / thread reload, not just the live SSE turn.
+    thread.messages.push({ role: "assistant", content: fullText, sources });
     thread.updatedAt = new Date();
     await thread.save();
 
     console.log(`[chat] generation completed thread=${threadId} durationMs=${Date.now() - startedAt}`);
 
-    sendEvent("done", {});
+    sendEvent("done", { sources });
     res.end();
   } catch (err) {
     if (clientClosed) {

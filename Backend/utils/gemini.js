@@ -73,7 +73,7 @@ const describeGeminiError = (err) => {
  * the client from continuing to read/forward the response — it does not
  * guarantee the upstream generation job itself is cancelled server-side.
  */
-export async function* streamGeminiResponse(contents, { abortSignal } = {}) {
+export async function* streamGeminiResponse(contents, { abortSignal, systemInstruction } = {}) {
     if (!Array.isArray(contents) || contents.length === 0) {
         throw new Error("contents must be a non-empty array");
     }
@@ -89,7 +89,7 @@ export async function* streamGeminiResponse(contents, { abortSignal } = {}) {
         stream = await ai.models.generateContentStream({
             model: MODEL,
             contents,
-            config: { systemInstruction: SYSTEM_INSTRUCTION, abortSignal: combinedSignal },
+            config: { systemInstruction: systemInstruction || SYSTEM_INSTRUCTION, abortSignal: combinedSignal },
         });
     } catch (err) {
         if (timeoutSignal.aborted) throw new Error("Gemini request timed out. Please try again.");
