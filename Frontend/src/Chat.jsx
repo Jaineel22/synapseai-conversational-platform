@@ -1,5 +1,5 @@
 import "./Chat.css";
-import React, { useContext, useState, useEffect } from "react";
+import { useContext, useEffect, useRef } from "react";
 import { MyContext } from "./MyContext";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
@@ -7,34 +7,13 @@ import "highlight.js/styles/github-dark.css";
 
 function Chat() {
   const { newChat, prevChats, reply } = useContext(MyContext);
-  const [latestReply, setLatestReply] = useState(null);
-  const [isTyping, setIsTyping] = useState(false);
+  const bottomRef = useRef(null);
 
+  // Keep the latest message (including a message still streaming in)
+  // visible as its content grows.
   useEffect(() => {
-    if (reply === null) {
-      setLatestReply(null);
-      setIsTyping(false);
-      return;
-    }
-
-    if (typeof reply === 'string' && reply.length > 0) {
-      setIsTyping(true);
-      const words = reply.split(" ");
-      if (words.length === 0) return;
-
-      let idx = 0;
-      const interval = setInterval(() => {
-        setLatestReply(words.slice(0, idx + 1).join(" "));
-        idx++;
-        if (idx >= words.length) {
-          clearInterval(interval);
-          setIsTyping(false);
-        }
-      }, 35);
-
-      return () => clearInterval(interval);
-    }
-  }, [reply]);
+    bottomRef.current?.scrollIntoView({ block: "end" });
+  }, [prevChats, reply]);
 
   // Welcome / empty state
   if (newChat && (!prevChats || prevChats.length === 0)) {
@@ -53,8 +32,8 @@ function Chat() {
 
   return (
     <div className="chats">
-      {/* Previous messages (all except last assistant) */}
-      {prevChats?.slice(0, -1).map((chat, idx) => (
+      {/* Completed messages, persisted or optimistically shown */}
+      {prevChats?.map((chat, idx) => (
         <div
           className={chat.role === "user" ? "userDiv" : "gptDiv"}
           key={`chat-${idx}-${chat.role}`}
@@ -71,24 +50,25 @@ function Chat() {
         </div>
       ))}
 
-      {/* Latest AI message with typing animation */}
-      {prevChats && prevChats.length > 0 && (
-        <div className="gptDiv" key="latest-message">
-          {isTyping ? (
-            <div>
-              <ReactMarkdown rehypePlugins={[rehypeHighlight]}>
-                {latestReply || ''}
-              </ReactMarkdown>
-            </div>
-          ) : (
-            <div>
-              <ReactMarkdown rehypePlugins={[rehypeHighlight]}>
-                {prevChats[prevChats.length - 1].content}
-              </ReactMarkdown>
-            </div>
-          )}
+      {/* The reply currently streaming in, rendered directly from live
+          chunks — not a client-side animation over an already-complete
+          response. Hidden until the first chunk actually arrives. */}
+      {reply && (
+        <div className="gptDiv" key="streaming-message">
+          {/* .gptDiv is a flex row container — ReactMarkdown renders its
+              output as sibling block elements (h1/p/h2/...) with no
+              wrapper of its own, so without this div they'd become
+              individual flex items laid out side by side instead of
+              stacking. This wrapper is what makes them one flex child. */}
+          <div>
+            <ReactMarkdown rehypePlugins={[rehypeHighlight]}>
+              {reply}
+            </ReactMarkdown>
+          </div>
         </div>
       )}
+
+      <div ref={bottomRef} />
     </div>
   );
 }

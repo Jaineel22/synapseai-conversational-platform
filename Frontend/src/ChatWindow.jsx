@@ -3,7 +3,22 @@ import Chat from "./Chat.jsx";
 import { MyContext } from "./MyContext.jsx";
 import { ThemeContext } from "./ThemeContext.jsx";
 import { useContext, useState, useEffect, useRef } from "react";
-import axios from 'axios';
+
+// Same base URL logic as axios.defaults.baseURL in App.jsx — kept separate
+// because fetch (needed for reading a streaming response body) doesn't go
+// through axios.
+const API_BASE = import.meta.env.VITE_API_URL || '';
+
+// Parses one SSE frame ("event: x\ndata: y") into its two fields.
+function parseSSEFrame(frame) {
+  let event = "message";
+  let data = "";
+  for (const line of frame.split("\n")) {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) data = line.slice(5).trim();
+  }
+  return { event, data };
+}
 
 // Neural network loader — three colored synapse dots
 function NeuralLoader() {
@@ -22,7 +37,7 @@ function NeuralLoader() {
 function ChatWindow() {
   const {
     prompt, setPrompt,
-    setReply,
+    reply, setReply,
     currThreadId,
     setPrevChats,
     setNewChat,
@@ -36,6 +51,7 @@ function ChatWindow() {
   const [showSettings, setShowSettings] = useState(false);
   const [showUpgrade, setShowUpgrade] = useState(false);
   const inputRef = useRef(null);
+  const abortControllerRef = useRef(null);
 
   const getReply = async () => {
     if (!prompt.trim() || loading) return;
@@ -46,26 +62,97 @@ function ChatWindow() {
     const currentPrompt = prompt;
     setPrompt("");
 
-    try {
-      const response = await axios.post("/api/chat", {
-        message: currentPrompt,
-        threadId: currThreadId
-      });
-      setReply(response.data.reply);
+    // Optimistic: show the user's message immediately. The backend saves
+    // it before it starts generating a reply, so this always matches what
+    // ends up persisted unless the request never reaches the server at all.
+    setPrevChats(prev => [...prev, { role: "user", content: currentPrompt }]);
+    setReply(""); // "" (not null) signals "streaming in progress, no text yet"
 
-      // Store the sent message alongside reply
-      setPrevChats(prev => ([
-        ...prev,
-        { role: "user", content: currentPrompt },
-        { role: "assistant", content: response.data.reply }
-      ]));
-    } catch(err) {
-      console.log(err);
-      // Restore prompt on error so user doesn't lose their message
-      setPrompt(currentPrompt);
-      alert(err.response?.data?.error || "Failed to get response");
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    let streamStarted = false;
+
+    try {
+      const response = await fetch(`${API_BASE}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ message: currentPrompt, threadId: currThreadId }),
+        signal: controller.signal,
+      });
+
+      const isStream = (response.headers.get("content-type") || "").includes("text/event-stream");
+
+      if (!isStream) {
+        // Validation/auth/db failures before generation starts are a plain
+        // JSON error response, same shape the app always used.
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to get response");
+      }
+
+      streamStarted = true; // the user message is now known to be saved server-side
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let accumulated = "";
+      let streamError = null;
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        let frameEnd;
+        while ((frameEnd = buffer.indexOf("\n\n")) !== -1) {
+          const { event, data } = parseSSEFrame(buffer.slice(0, frameEnd));
+          buffer = buffer.slice(frameEnd + 2);
+          if (!data) continue;
+
+          const payload = JSON.parse(data);
+          if (event === "chunk") {
+            accumulated += payload.text;
+            setReply(accumulated);
+          } else if (event === "error") {
+            streamError = payload.error || "Something went wrong";
+          }
+        }
+      }
+
+      if (streamError) throw new Error(streamError);
+      if (!accumulated) throw new Error("Empty response received");
+
+      // Move the finished reply into persisted history.
+      setPrevChats(prev => [...prev, { role: "assistant", content: accumulated }]);
+      setReply(null);
+    } catch (err) {
+      if (err.name === "AbortError") {
+        // User clicked Stop. Nothing was persisted server-side for the
+        // reply, so just clear the in-progress bubble — not an error.
+        setReply(null);
+      } else {
+        console.log(err);
+        setReply(null);
+        if (streamStarted) {
+          // The user's message was already saved — keep it visible and
+          // just surface that the reply failed.
+          alert(err.message || "Failed to get response");
+        } else {
+          // Nothing was saved — restore the prompt and remove the
+          // optimistic bubble so the UI matches server state.
+          setPrompt(currentPrompt);
+          setPrevChats(prev => prev.slice(0, -1));
+          alert(err.message || "Failed to get response");
+        }
+      }
+    } finally {
+      setLoading(false);
+      abortControllerRef.current = null;
     }
-    setLoading(false);
+  };
+
+  const stopGeneration = () => {
+    abortControllerRef.current?.abort();
   };
 
   const handleKeyDown = (e) => {
@@ -154,8 +241,9 @@ function ChatWindow() {
         <Chat />
       </div>
 
-      {/* Loader */}
-      {loading && <NeuralLoader />}
+      {/* Loader — only while waiting for the first chunk; once real text
+          starts streaming in, the growing message itself is the indicator */}
+      {loading && reply === "" && <NeuralLoader />}
 
       {/* Input */}
       <div className="chatInput">
@@ -168,17 +256,17 @@ function ChatWindow() {
             onKeyDown={handleKeyDown}
             disabled={loading}
           />
-          {/* Send button — always visible, active state when prompt has content */}
+          {/* Send/Stop button — becomes a Stop control while a reply is streaming */}
           <button
             id="submit"
-            onClick={getReply}
-            disabled={!hasPrompt || loading}
-            className={hasPrompt && !loading ? 'active' : ''}
-            title="Send message (or press Enter)"
-            aria-label="Send message"
+            onClick={loading ? stopGeneration : getReply}
+            disabled={!loading && !hasPrompt}
+            className={hasPrompt || loading ? 'active' : ''}
+            title={loading ? "Stop generating" : "Send message (or press Enter)"}
+            aria-label={loading ? "Stop generating" : "Send message"}
           >
             {loading ? (
-              <i className="fa-solid fa-spinner fa-spin"></i>
+              <i className="fa-solid fa-stop"></i>
             ) : (
               <i className="fa-solid fa-paper-plane"></i>
             )}
