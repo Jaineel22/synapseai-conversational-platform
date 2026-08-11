@@ -108,8 +108,8 @@ app.use((req, res) => {
 // details (stack traces, driver messages), so only a generic message is
 // sent to the client; the full error is still logged server-side.
 app.use((err, req, res, next) => {
-    console.error('Unhandled error:', err);
     const status = err.status || 500;
+    console.error(`[error] ${req.method} ${req.originalUrl} status=${status}`, err);
     const message = status < 500 ? (err.message || 'Bad request') : 'Internal server error';
     res.status(status).json({ error: message });
 });

@@ -4,6 +4,7 @@ import Thread from "../models/Thread.js";
 import { streamGeminiResponse, buildGeminiContents, MAX_CONTEXT_MESSAGES } from "../utils/gemini.js";
 import { retrieveRelevantChunks } from "../services/retrieval.js";
 import { buildRagContents, buildSourcesPayload, RAG_SYSTEM_INSTRUCTION } from "../services/ragPrompt.js";
+import { TOOL_DECLARATIONS } from "../services/tools.js";
 import authMiddleware from "../middleware/auth.js";
 import validateBody from "../middleware/validate.js";
 import { chatLimiter } from "../middleware/rateLimiter.js";
@@ -186,7 +187,7 @@ router.post("/chat", chatLimiter, validateBody(chatSchema), async (req, res) => 
   try {
     console.log(`[chat] generation started thread=${threadId} user=${req.userId} knowledge=${useKnowledge}`);
 
-    for await (const delta of streamGeminiResponse(contents, { abortSignal: abortController.signal, systemInstruction })) {
+    for await (const delta of streamGeminiResponse(contents, { abortSignal: abortController.signal, systemInstruction, tools: TOOL_DECLARATIONS })) {
       // The Gemini SDK's abortSignal is documented as "client-only" — it
       // does not reliably stop the async generator from yielding further
       // chunks that may already be in flight. Checking clientClosed here

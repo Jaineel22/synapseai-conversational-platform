@@ -1,6 +1,12 @@
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 
+// One concise line per throttled request — enough to distinguish "a real
+// user hit a sane limit" from "something is hammering this route" without
+// logging IPs/user IDs at high volume. req.userId is only ever populated
+// on routes mounted after authMiddleware; unauthenticated throttling (e.g.
+// login) has no identity to log yet, which is expected, not a bug.
 const jsonRateLimitHandler = (req, res) => {
+    console.warn(`[rate-limit] ${req.method} ${req.originalUrl} user=${req.userId || "anonymous"}`);
     res.status(429).json({ error: "Too many requests. Please try again later." });
 };
 

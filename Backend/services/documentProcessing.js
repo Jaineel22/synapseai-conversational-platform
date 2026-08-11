@@ -58,9 +58,18 @@ export async function processDocument({ documentId, buffer, fileType }) {
         console.log(`[documents] processing completed document=${documentId} chunks=${chunkDocs.length}`);
     } catch (err) {
         console.error(`[documents] processing failed document=${documentId}`, err.message);
+        // insertMany can partially succeed before a later step fails (e.g.
+        // a transient DB error between the insert and the status update
+        // below) — without this cleanup, those chunks would remain
+        // retrievable by RAG even though the document itself shows
+        // "failed", which is exactly the "misleading ready state" this
+        // guards against. MongoDB has no multi-document rollback here
+        // without transactions, so this is an explicit compensating step.
+        await Chunk.deleteMany({ documentId }).catch(() => {});
         await Document.findByIdAndUpdate(documentId, {
             status: "failed",
             error: err.message || "Document processing failed.",
+            chunkCount: 0,
         }).catch(() => {});
     }
 }

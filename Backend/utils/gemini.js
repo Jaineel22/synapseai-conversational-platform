@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { GoogleGenAI } from "@google/genai";
+import { executeTool } from "../services/tools.js";
 
 // Initialize Google GenAI with API key from environment variables
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -72,8 +73,17 @@ const describeGeminiError = (err) => {
  * disconnected or clicked "Stop"). Per the SDK's own docs this only stops
  * the client from continuing to read/forward the response — it does not
  * guarantee the upstream generation job itself is cancelled server-side.
+ *
+ * `tools` (optional, FunctionDeclaration[]) enables Gemini function
+ * calling for this turn — see services/tools.js. When the model responds
+ * with a function call instead of (or in addition to) text, it's executed
+ * server-side via `executeTool` and the result is sent back in exactly one
+ * follow-up request (tools omitted from that follow-up, so a single turn
+ * can't chain an unbounded sequence of calls) to produce the final answer.
+ * Omitting `tools` entirely preserves the original plain-text-only
+ * behavior unchanged.
  */
-export async function* streamGeminiResponse(contents, { abortSignal, systemInstruction } = {}) {
+export async function* streamGeminiResponse(contents, { abortSignal, systemInstruction, tools } = {}) {
     if (!Array.isArray(contents) || contents.length === 0) {
         throw new Error("contents must be a non-empty array");
     }
@@ -83,24 +93,24 @@ export async function* streamGeminiResponse(contents, { abortSignal, systemInstr
 
     const timeoutSignal = AbortSignal.timeout(GEMINI_TIMEOUT_MS);
     const combinedSignal = abortSignal ? AbortSignal.any([abortSignal, timeoutSignal]) : timeoutSignal;
+    const resolvedSystemInstruction = systemInstruction || SYSTEM_INSTRUCTION;
+
+    const config = { systemInstruction: resolvedSystemInstruction, abortSignal: combinedSignal };
+    if (tools?.length) config.tools = [{ functionDeclarations: tools }];
 
     let stream;
     try {
-        stream = await ai.models.generateContentStream({
-            model: MODEL,
-            contents,
-            config: { systemInstruction: systemInstruction || SYSTEM_INSTRUCTION, abortSignal: combinedSignal },
-        });
+        stream = await ai.models.generateContentStream({ model: MODEL, contents, config });
     } catch (err) {
         if (timeoutSignal.aborted) throw new Error("Gemini request timed out. Please try again.");
         throw describeGeminiError(err);
     }
 
+    const pendingFunctionCalls = [];
     try {
         for await (const chunk of stream) {
-            if (chunk.text) {
-                yield chunk.text;
-            }
+            if (chunk.text) yield chunk.text;
+            if (chunk.functionCalls?.length) pendingFunctionCalls.push(...chunk.functionCalls);
         }
     } catch (err) {
         if (timeoutSignal.aborted) throw new Error("Gemini request timed out. Please try again.");
@@ -108,6 +118,52 @@ export async function* streamGeminiResponse(contents, { abortSignal, systemInstr
         // (client disconnected / clicked Stop) — let it propagate as-is so
         // the caller can distinguish "user stopped it" from "Gemini
         // actually failed".
+        if (err?.name === "AbortError") throw err;
+        throw describeGeminiError(err);
+    }
+
+    if (pendingFunctionCalls.length === 0) return;
+
+    // Each requested call is executed deterministically, server-side.
+    // Execution failures (e.g. an unrecognized tool name, which should
+    // never happen given the model is only ever offered fixed
+    // declarations) are reported back to the model as a normal function
+    // result rather than aborting the whole turn — Gemini can then explain
+    // the failure to the user in its own final answer.
+    const functionResponseParts = pendingFunctionCalls.map((call) => {
+        let response;
+        try {
+            response = executeTool(call.name, call.args);
+        } catch (err) {
+            response = { error: err.message || "Tool execution failed." };
+        }
+        return { functionResponse: { id: call.id, name: call.name, response } };
+    });
+
+    const followUpContents = [
+        ...contents,
+        { role: "model", parts: pendingFunctionCalls.map((call) => ({ functionCall: call })) },
+        { role: "user", parts: functionResponseParts },
+    ];
+
+    let followUpStream;
+    try {
+        followUpStream = await ai.models.generateContentStream({
+            model: MODEL,
+            contents: followUpContents,
+            config: { systemInstruction: resolvedSystemInstruction, abortSignal: combinedSignal },
+        });
+    } catch (err) {
+        if (timeoutSignal.aborted) throw new Error("Gemini request timed out. Please try again.");
+        throw describeGeminiError(err);
+    }
+
+    try {
+        for await (const chunk of followUpStream) {
+            if (chunk.text) yield chunk.text;
+        }
+    } catch (err) {
+        if (timeoutSignal.aborted) throw new Error("Gemini request timed out. Please try again.");
         if (err?.name === "AbortError") throw err;
         throw describeGeminiError(err);
     }
